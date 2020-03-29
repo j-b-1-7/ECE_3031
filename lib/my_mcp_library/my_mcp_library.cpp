@@ -9,117 +9,82 @@
 #include <stdlib.h>
 #include <my_mcp_library.h>
 
-
+#define DEF_OFFSET 0x0
 #define GPIO_OFFSET 0x12
 
-uint8_t IN_REG[2] = { 0 };
-uint8_t OUT_REG[2] = { 0 };
-
+uint8_t REG[2] = { 0 };
 uint8_t IODIR[2] = { 0 };
+bool is_init = false;
 
-void buffer_IO_direction(REG_AB reg, uint8_t pinID, PIN_DIRECTION dir)
+uint8_t _read(uint8_t *src, uint8_t id)
 {
-
-    IODIR[reg] &= ~(1 << pinID);
-    IODIR[reg] |= (dir << pinID);
-    
+    uint8_t val = *src & (1 << id);
 }
 
-void write_IO_direction()
+void _write(uint8_t *src, uint8_t id, uint8_t value)
 {
+    value &= 0x1; // make sure we only set one bit
+    *src &= ~(1 << id);
+    *src |= (value << id);
+}
 
+uint8_t _mcp_read(uint8_t addr)
+{
     Wire.beginTransmission(MCP_ADD);
-
-    Wire.write(A);
-    Wire.write(IODIR[A]);
-
+    Wire.write(addr);
+    Wire.requestFrom(MCP_ADD, 1);
+    uint8_t value = Wire.read();
     Wire.endTransmission();
+    return value;
+}
 
+void _mcp_write(uint8_t addr, uint8_t value)
+{
     Wire.beginTransmission(MCP_ADD);
-
-    Wire.write(B);
-    Wire.write(IODIR[B]);
-
+    Wire.write(addr);
+    Wire.write(value);
     Wire.endTransmission();
-
 }
 
-
-
-void mcp_buffer_pin(REG_AB reg, uint8_t pinID, uint8_t state)
+/**
+ * expects:
+ *  
+ */
+uint8_t _mcp_refresh(uint8_t addr, uint8_t mask, uint8_t write_value)
 {
-    OUT_REG[reg] &= ~(1 << pinID);
-    OUT_REG[reg] |= (state << pinID);
+    uint8_t read_value = _mcp_read(addr);
+    uint8_t o_value = write_value &= ~(mask);
+    uint8_t i_value = read_value &= (mask);
+    // join the values to get the real one
+    uint8_t writeback = o_value | i_value;
+    _mcp_write(addr, writeback);
+    return writeback;
 }
 
-void mcp_write()
+void mcp_set(REG_AB reg, uint8_t pinID, PIN_DIRECTION dir)
 {
+    _write(&IODIR[reg], pinID, dir);
+}
 
-    Wire.beginTransmission(MCP_ADD);
-    
-    Wire.write(A+GPIO_OFFSET);
-
-    if(Wire.write(OUT_REG[A]) == 0)
+void mcp_refresh()
+{
+    if(!is_init)
     {
-        //ERROR
+        // set the direction
+        is_init = true;
+        _mcp_write(DEF_OFFSET + A, IODIR[A]);
+        _mcp_write(DEF_OFFSET + B, IODIR[B]);
     }
+    REG[A] = _mcp_refresh(GPIO_OFFSET + A, IODIR[A], REG[A]);
+    REG[B] = _mcp_refresh(GPIO_OFFSET + B, IODIR[B], REG[B]);    
+}
 
-    Wire.endTransmission();
-
-    Wire.beginTransmission(MCP_ADD);
-    
-    Wire.write(B+GPIO_OFFSET);
-    Wire.write(OUT_REG[B]);
-
-    Wire.endTransmission();
-
+void mcp_write(REG_AB reg, uint8_t pinID, uint8_t state)
+{
+    _write(&REG[reg], pinID, state);
 }
 
 uint8_t mcp_read(REG_AB reg, uint8_t pinID)
 {
-    return (IN_REG[reg] & (1 << pinID));       
-}
-
-void mcp_update_pins()
-{
-
-    Wire.beginTransmission(MCP_ADD);
-
-    Wire.write(A+GPIO_OFFSET);
-    Wire.requestFrom(MCP_ADD, 1);
-
-    IN_REG[A] = Wire.read();
-
-    Wire.endTransmission();
-
-    Wire.beginTransmission(MCP_ADD);
-
-    Wire.write(A+GPIO_OFFSET);
-    Wire.write(OUT_REG[A]);
-
-    Wire.endTransmission();
-
-    Wire.beginTransmission(MCP_ADD);
-
-    Wire.write(B+GPIO_OFFSET);
-    Wire.requestFrom(MCP_ADD, 1);
-
-    IN_REG[B] = Wire.read();
-    
-    Wire.endTransmission();
-
-    Wire.beginTransmission(MCP_ADD);
-
-    Wire.write(B+GPIO_OFFSET);
-    Wire.write(OUT_REG[B]);
-
-    Wire.endTransmission();
-    
-}
-
-uint8_t get_reg_val(REG_AB reg)
-{
-
-    return IN_REG[reg];
-
+    return _read(&REG[reg], pinID);
 }
