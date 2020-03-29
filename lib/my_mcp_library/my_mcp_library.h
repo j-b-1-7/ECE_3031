@@ -16,13 +16,7 @@ enum REG_AB
     B = 0x01
 };
 
-enum PIN_DIRECTION
-{
-    OUTPUT_PIN = 0x00,
-    INPUT_PIN = 0x01
-};
-
-void mcp_set(REG_AB reg, uint8_t pinID, PIN_DIRECTION dir);
+void mcp_set(REG_AB reg, uint8_t pinID, uint8_t dir);
 
 void mcp_refresh();
 void mcp_write(REG_AB reg, uint8_t pinID, uint8_t state);

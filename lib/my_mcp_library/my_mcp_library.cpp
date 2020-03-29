@@ -5,6 +5,7 @@
 *   Date: March 28 2020
 */
 
+#include <Arduino.h>
 #include <Wire.h>
 #include <stdlib.h>
 #include <my_mcp_library.h>
@@ -18,13 +19,12 @@ static bool is_init = false;
 
 static uint8_t _read(uint8_t *src, uint8_t id)
 {
-    return (*src & (1 << id));
+    return (*src >> id) & 0x1;
 }
 
 static void _write(uint8_t *src, uint8_t id, uint8_t value)
 {
-    value &= 0x1; // make sure we only set one bit
-    *src &= ~(1 << id);
+    *src &= ~(0x1 << id);
     *src |= (value << id);
 }
 
@@ -40,8 +40,8 @@ static uint8_t _mcp_read(uint8_t addr)
 
 static void _mcp_write(uint8_t addr, uint8_t value)
 {
-    Wire.beginTransmission(0x20);
-    Wire.write(0x13);
+    Wire.beginTransmission(MCP_ADD);
+    Wire.write(addr);
     Wire.write(value);
     Wire.endTransmission();
 }
@@ -63,9 +63,12 @@ static uint8_t _mcp_refresh(uint8_t addr, uint8_t mask, uint8_t write_value)
     return writeback;
 }
 
-void mcp_set(REG_AB reg, uint8_t pinID, PIN_DIRECTION dir)
+void mcp_set(REG_AB reg, uint8_t pinID, uint8_t dir)
 {
-    _write(&IODIR[reg], pinID, dir);
+    // we need to flip the direction since mcp expects I = 1, O = 0
+    // but arduino uses INPUT = 0x0 and OUTPUT = 0x1
+    uint8_t reverse_direction = (~dir);
+    _write(&IODIR[reg], pinID, reverse_direction);
 }
 
 void mcp_refresh()

@@ -7,8 +7,6 @@
 #include "my_mcp_library.h"
 #include "my_I2C_LCD.h"
 
-#define NB_OF_PIN 14
-
 #define PIN_REFRESH_RATE 1
 #define SHORT_DEBOUNCE_COUNT 1
 #define LONG_DEBOUNCE_COUNT 1
@@ -17,11 +15,6 @@
 
 #define MCU_SDA A4
 #define MCU_SCL A5
-
-#define MCU_SRAM_CS 10
-#define MCU_MISO 12
-#define MCU_SCK 13
-#define MCU_MOSI 11
 
 #define MAX_SPI_SPEED 20000000
 
@@ -37,22 +30,93 @@
 #define COMRX 1
 ///////////////////
 
-#define B_auto_feed 0
-#define B_Inc 1
-#define B_Dec 2
-#define B_feed 3
-#define B_fill 4
-#define B_Emergency 5
-#define empty_switch 6
-#define full_switch 7
+enum pins_e
+{
+	NC_0 = 0x0,
+	NC_1 = 0x1,
+	NC_2 = 0x2,
+	NC_3 = 0x3,
+	NC_4 = 0x4,
+	NC_5 = 0x5,
+	NC_6 = 0x6,
+	NC_7 = 0x7,
+	NC_8 = 0x8,
+	NC_9 = 0x9,
+	MCU_SRAM_CS = 0x10,
+	MCU_MOSI = 0x11,
+	MCU_MISO = 0x12,
+	MCU_SCK = 0x13,
+	EXP_A_START = 0x14, // We start expander here (section A)
+	B_auto_feed = 0x14,
+	B_Inc = 0x15,
+	B_Dec = 0x16,
+	B_feed = 0x17,
+	B_fill = 0x18,
+	B_Emergency = 0x19,
+	empty_switch = 0x20,
+	full_switch = 0x21,
+	EXP_B_START = 0x22, // We start expander here (section B)
+	LED_auto_feed = 0x22,
+	LED_Inc = 0x23,
+	LED_Dec = 0x24,
+	LED_feed = 0x25,
+	LED_fill = 0x26,
+	Buzzer = 0x27,
+	NC_28 = 0x28,
+	NC_29 = 0x29,
+	NC_30 = 0x30,
+	NB_OF_PIN = NC_30
+};
 
-#define LED_auto_feed 0 
-#define LED_Inc 1
-#define LED_Dec 2
-#define LED_feed 3
-#define LED_fill 4
+void setPin(uint8_t pin, uint8_t val)
+{
+	if(pin < EXP_A_START)
+	{
+		pinMode(pin, val);
+	}
+	else if (pin < EXP_B_START)
+	{
+		mcp_set(A, pin, val);
+	}
+	else
+	{
+		mcp_set(B, pin, val);
+	}
+}
 
-#define Buzzer 5
+uint8_t readPin(uint8_t pin)
+{
+	uint8_t val = 0x0;
+	if(pin < EXP_A_START)
+	{
+		val = digitalRead(pin);
+	}
+	else if (pin < EXP_B_START)
+	{
+		val = mcp_read(A,pin);
+	}
+	else
+	{
+		val = mcp_read(B,pin);
+	}
+	return val;
+}
+
+void writePin(uint8_t pin, uint8_t val)
+{
+	if(pin < EXP_A_START)
+	{
+		digitalWrite(pin, val);
+	}
+	else if (pin < EXP_B_START)
+	{
+		mcp_write(A, pin, val);
+	}
+	else
+	{
+		mcp_write(B, pin, val);
+	}
+}
 
 static MicrochipSRAM memory(MCU_SRAM_CS); // Instantiate the class to the given pin
 
@@ -173,7 +237,7 @@ trigger_t pin_trigger[NB_OF_PIN];
 bool pin_has_changed(long current_millis, short pin_id, short trigger)
 {
 	bool changes = false;
-	uint8_t current_pin = mcp_read(A, pin_id);  
+	uint8_t current_pin = readPin(pin_id);  
 
 	// if we were waiting for an event
 	if (! timer_is_started(&pin_trigger[pin_id]))
@@ -303,55 +367,45 @@ void setup()
 
 	Wire.begin();
 
-	for (int i=0; i<8; i++)
-	{
-		mcp_set(A, i, OUTPUT_PIN);
-		mcp_set(B, i, OUTPUT_PIN);
-		mcp_write(A, i, HIGH);
-		mcp_write(B, i, HIGH);
-	}
-
-	// mcp_set(A, B_feed, INPUT_PIN);
-	// mcp_set(A, B_auto_feed, INPUT_PIN);
-	// mcp_set(A, B_fill, INPUT_PIN);
-	// mcp_set(A, B_Inc, INPUT_PIN);
-	// mcp_set(A, B_Dec, INPUT_PIN);
-	//mcp_set(A, B_Emergency, INPUT_PIN);
-	//mcp_set(A, empty_switch, INPUT_PIN);
-	//mcp_set(A, full_switch, INPUT_PIN);
-
+	setPin(MCU_SRAM_CS, OUTPUT);
+	setPin(MCU_MISO, INPUT);
+	setPin(MCU_SCK, OUTPUT);
+	setPin(MCU_MOSI, OUTPUT);
+	setPin(MCU_SCL, OUTPUT);
+	setPin(MCU_SDA, OUTPUT);
+	setPin(B_feed, INPUT);
+	setPin(B_auto_feed, INPUT);
+	setPin(B_fill, INPUT);
+	setPin(B_Inc, INPUT);
+	setPin(B_Dec, INPUT);
+	// setPin(B_Emergency, INPUT);
+	// setPin(empty_switch, INPUT);
+	// setPin(full_switch, INPUT);
+	setPin(LED_auto_feed, OUTPUT);
+	setPin(LED_Inc, OUTPUT);
+	setPin(LED_Dec, OUTPUT);
+	setPin(LED_feed, OUTPUT);
+	setPin(LED_fill, OUTPUT);
+	// setPin(Buzzer, OUTPUT);
 	// Set the default pin value
 
-	// mcp_write(A, B_feed, LOW);
-	// mcp_write(A, B_auto_feed, LOW);
-	// mcp_write(A, B_fill, LOW);
-	// mcp_write(A, B_Inc, LOW);
-	// mcp_write(A, B_Dec, LOW);
+	writePin(MCU_SCL, LOW);
+	writePin(MCU_SDA, LOW);
+	writePin(B_feed, HIGH);
+	writePin(B_auto_feed, HIGH);
+	writePin(B_fill, HIGH);
+	writePin(B_Inc, HIGH);
+	writePin(B_Dec, HIGH);
+	// writePin(B_Emergency, HIGH);
+	// writePin(empty_switch, HIGH);
+	// writePin(full_switch, HIGH);
+	writePin(LED_auto_feed, LOW);
+	writePin(LED_Inc, LOW);
+	writePin(LED_Dec, LOW);
+	writePin(LED_feed, LOW);
+	writePin(LED_fill, LOW);
+	// writePin(Buzzer, LOW);
 
-	// mcp_set(B, LED_auto_feed, INPUT_PIN);
-	// mcp_set(B, LED_Inc, INPUT_PIN);
-	// mcp_set(B, LED_Dec, INPUT_PIN);
-	// mcp_set(B, LED_feed, INPUT_PIN);
-	// mcp_set(B, LED_fill, OUTPUT_PIN);
-	// mcp_set(A, 7, OUTPUT_PIN);
-	// mcp_set(B, Buzzer, OUTPUT_PIN);
-
-
-	mcp_write(B, LED_auto_feed, LOW);
-	mcp_write(B, LED_Inc, LOW);
-	mcp_write(B, LED_Dec, LOW);
-	mcp_write(B, LED_feed, LOW);
-	mcp_write(B, LED_fill, LOW);
-
-	pinMode(MCU_SRAM_CS, OUTPUT);
-	pinMode(MCU_MISO, INPUT);
-	pinMode(MCU_SCK, OUTPUT);
-	pinMode(MCU_MOSI, OUTPUT);
-	
-	pinMode(MCU_SCL, OUTPUT);
-	pinMode(MCU_SDA, OUTPUT);
-	digitalWrite(MCU_SCL, LOW);
-	digitalWrite(MCU_SDA, LOW);
 	delay(10);
 
 	Serial.begin(9600);
@@ -383,11 +437,11 @@ void setup()
 	}
 
 	set_time(&glb_timer, feed_time/60, feed_time%60, 0);
-	// // stop all the timers
-	// for(int i=0; i < NB_OF_PIN; i++)
-	// {
-	//   stop_timer(&pin_trigger[i]);
-	// }
+	// reset all the timers
+	for(int i=0; i < NB_OF_PIN; i++)
+	{
+	  stop_timer(&pin_trigger[i]);
+	}
 	man_feed = false;
 	auto_feed = false;
 	fill = false;
@@ -398,25 +452,6 @@ void setup()
 long last_time = 0;
 void loop() 
 {
-
-	lcd_print("No                  ");
-	for (int i=0; i<8; i++)
-	{
-		mcp_write(A, i, LOW);
-		mcp_write(B, i, LOW);
-	}
-	delay(3000);
-
-	lcd_print("Working!            ");
-	for (int i=0; i<8; i++)
-	{
-		mcp_write(A, i, HIGH);
-		mcp_write(B, i, HIGH);
-	}
-	delay(3000);
-
-	if(false)
-	{
 	long current_millis = millis();
 	
 	if(times_up(&glb_timer))
@@ -454,7 +489,7 @@ void loop()
 			if ( ! man_feed && ! auto_feed && ! fill )
 			{
 				feed_time += 1;
-				mcp_write(B, LED_Inc, HIGH);
+				writePin(LED_Inc, HIGH);
 			}
 		}
 
@@ -530,6 +565,5 @@ void loop()
 		/* if it is not running, you can still change the time */
 		set_time(&glb_timer, feed_time / 60, feed_time % 60, 0);
 	// }
-	}
 	
 }
