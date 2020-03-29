@@ -9,9 +9,9 @@
 
 #define NB_OF_PIN 14
 
-#define PIN_REFRESH_RATE 15
-#define SHORT_DEBOUNCE_COUNT 5
-#define LONG_DEBOUNCE_COUNT 15
+#define PIN_REFRESH_RATE 1
+#define SHORT_DEBOUNCE_COUNT 1
+#define LONG_DEBOUNCE_COUNT 1
 #define DEBOUNCE_ON (PIN_REFRESH_RATE*LONG_DEBOUNCE_COUNT)
 #define DEBOUNCE_OFF (PIN_REFRESH_RATE*SHORT_DEBOUNCE_COUNT)
 
@@ -303,28 +303,37 @@ void setup()
 
 	Wire.begin();
 
-	mcp_set(A, B_feed, INPUT_PIN);
-	mcp_set(A, B_auto_feed, INPUT_PIN);
-	mcp_set(A, B_fill, INPUT_PIN);
-	mcp_set(A, B_Inc, INPUT_PIN);
-	mcp_set(A, B_Dec, INPUT_PIN);
+	for (int i=0; i<8; i++)
+	{
+		mcp_set(A, i, OUTPUT_PIN);
+		mcp_set(B, i, OUTPUT_PIN);
+		mcp_write(A, i, HIGH);
+		mcp_write(B, i, HIGH);
+	}
+
+	// mcp_set(A, B_feed, INPUT_PIN);
+	// mcp_set(A, B_auto_feed, INPUT_PIN);
+	// mcp_set(A, B_fill, INPUT_PIN);
+	// mcp_set(A, B_Inc, INPUT_PIN);
+	// mcp_set(A, B_Dec, INPUT_PIN);
 	//mcp_set(A, B_Emergency, INPUT_PIN);
 	//mcp_set(A, empty_switch, INPUT_PIN);
 	//mcp_set(A, full_switch, INPUT_PIN);
 
 	// Set the default pin value
 
-	mcp_write(A, B_feed, HIGH);
-	mcp_write(A, B_auto_feed, HIGH);
-	mcp_write(A, B_fill, HIGH);
-	mcp_write(A, B_Inc, HIGH);
-	mcp_write(A, B_Dec, HIGH);
+	// mcp_write(A, B_feed, LOW);
+	// mcp_write(A, B_auto_feed, LOW);
+	// mcp_write(A, B_fill, LOW);
+	// mcp_write(A, B_Inc, LOW);
+	// mcp_write(A, B_Dec, LOW);
 
-	mcp_set(B, LED_auto_feed, OUTPUT_PIN);
-	mcp_set(B, LED_Inc, OUTPUT_PIN);
-	mcp_set(B, LED_Dec, OUTPUT_PIN);
-	mcp_set(B, LED_feed, OUTPUT_PIN);
-	mcp_set(B, LED_fill, OUTPUT_PIN);
+	// mcp_set(B, LED_auto_feed, INPUT_PIN);
+	// mcp_set(B, LED_Inc, INPUT_PIN);
+	// mcp_set(B, LED_Dec, INPUT_PIN);
+	// mcp_set(B, LED_feed, INPUT_PIN);
+	// mcp_set(B, LED_fill, OUTPUT_PIN);
+	// mcp_set(A, 7, OUTPUT_PIN);
 	// mcp_set(B, Buzzer, OUTPUT_PIN);
 
 
@@ -389,6 +398,25 @@ void setup()
 long last_time = 0;
 void loop() 
 {
+
+	lcd_print("No                  ");
+	for (int i=0; i<8; i++)
+	{
+		mcp_write(A, i, LOW);
+		mcp_write(B, i, LOW);
+	}
+	delay(3000);
+
+	lcd_print("Working!            ");
+	for (int i=0; i<8; i++)
+	{
+		mcp_write(A, i, HIGH);
+		mcp_write(B, i, HIGH);
+	}
+	delay(3000);
+
+	if(false)
+	{
 	long current_millis = millis();
 	
 	if(times_up(&glb_timer))
@@ -469,38 +497,39 @@ void loop()
 		
 	}
 
-	if( man_feed || auto_feed )
-	{
+	// if( man_feed || auto_feed )
+	// {
 
-		/*
-		 *        Main operation happens here:
-		 *        Motor driving, checking stop switches, down-count timer,
-		 *        Buzzer
-		 */
+	// 	/*
+	// 	 *        Main operation happens here:
+	// 	 *        Motor driving, checking stop switches, down-count timer,
+	// 	 *        Buzzer
+	// 	 */
 
-		update_time(&glb_timer, current_millis);
+	// 	update_time(&glb_timer, current_millis);
 		
-		/* store in memeory if necessary */
-		if ( mem_feed_time >= 0 && feed_time != mem_feed_time ) 
-		{  
-				Serial.print("Storing feed time to memory <");
-				Serial.print(feed_time);
-				Serial.println(">");
-				memory.put(MEM_ADDR, feed_time);
-				/* sanity check that we wrote */
-				memory.get(MEM_ADDR, mem_feed_time);
-				if ( mem_feed_time != feed_time ) 
-				{  
-						Serial.print("Unable to store the feed time to memory");
-				}
+	// 	/* store in memeory if necessary */
+	// 	if ( mem_feed_time >= 0 && feed_time != mem_feed_time ) 
+	// 	{  
+	// 			Serial.print("Storing feed time to memory <");
+	// 			Serial.print(feed_time);
+	// 			Serial.println(">");
+	// 			memory.put(MEM_ADDR, feed_time);
+	// 			/* sanity check that we wrote */
+	// 			memory.get(MEM_ADDR, mem_feed_time);
+	// 			if ( mem_feed_time != feed_time ) 
+	// 			{  
+	// 					Serial.print("Unable to store the feed time to memory");
+	// 			}
 
-				mem_feed_time = -1;
-		}
-	}
-	else
-	{
+	// 			mem_feed_time = -1;
+	// 	}
+	// }
+	// else
+	// {
 		/* if it is not running, you can still change the time */
 		set_time(&glb_timer, feed_time / 60, feed_time % 60, 0);
+	// }
 	}
 	
 }
