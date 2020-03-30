@@ -1,5 +1,5 @@
-#ifndef MY_MCP_LIBRARY_H
-#define MY_MCP_LIBRARY_H
+#ifndef MCP_H
+#define MCP_H
 
 /*
 *   Library intended for use with the MCP23017 IO expander chip. 
@@ -8,7 +8,8 @@
 *   Date: March 28 2020
 */
 
-#define MCP_ADD 0x20
+/* as per data sheet */
+#define MCP_I2C_ADDR 0x20 
 
 enum REG_AB
 {

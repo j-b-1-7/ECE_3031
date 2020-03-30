@@ -8,7 +8,10 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include <stdlib.h>
-#include <my_mcp_library.h>
+
+#include "message.h"
+#include "mcp.h"
+#include "i2c.h"
 
 #define DEF_OFFSET 0x0
 #define GPIO_OFFSET 0x12
@@ -30,20 +33,14 @@ static void _write(uint8_t *src, uint8_t id, uint8_t value)
 
 static uint8_t _mcp_read(uint8_t addr)
 {
-    Wire.beginTransmission(MCP_ADD);
-    Wire.write(addr);
-    Wire.requestFrom(MCP_ADD, 1);
-    uint8_t value = Wire.read();
-    Wire.endTransmission();
-    return value;
+    uint8_t dest = 0x0;
+    i2c_read(MCP_I2C_ADDR, addr, &dest, 1);
+    return dest;
 }
 
 static void _mcp_write(uint8_t addr, uint8_t value)
 {
-    Wire.beginTransmission(MCP_ADD);
-    Wire.write(addr);
-    Wire.write(value);
-    Wire.endTransmission();
+    i2c_write(MCP_I2C_ADDR, addr, &value, 1);
 }
 
 /**
@@ -81,7 +78,7 @@ void mcp_refresh()
         _mcp_write(DEF_OFFSET + B, IODIR[B]);
     }
     REG[A] = _mcp_refresh(GPIO_OFFSET + A, IODIR[A], REG[A]);
-    REG[B] = _mcp_refresh(GPIO_OFFSET + B, IODIR[B], REG[B]);    
+    REG[B] = _mcp_refresh(GPIO_OFFSET + B, IODIR[B], REG[B]);  
 }
 
 void mcp_write(REG_AB reg, uint8_t pinID, uint8_t state)
@@ -91,5 +88,6 @@ void mcp_write(REG_AB reg, uint8_t pinID, uint8_t state)
 
 uint8_t mcp_read(REG_AB reg, uint8_t pinID)
 {
-    return _read(&REG[reg], pinID);
+    uint8_t val = _read(&REG[reg], pinID);
+    return val;
 }
