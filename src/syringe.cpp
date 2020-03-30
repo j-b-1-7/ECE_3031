@@ -14,9 +14,9 @@
 
 #define SERIAL_BAUD_RATE 9600
 
-#define PIN_REFRESH_RATE 1
-#define SHORT_DEBOUNCE_COUNT 1
-#define LONG_DEBOUNCE_COUNT 1
+#define PIN_REFRESH_RATE 5
+#define SHORT_DEBOUNCE_COUNT 2
+#define LONG_DEBOUNCE_COUNT 5
 #define DEBOUNCE_ON (PIN_REFRESH_RATE*LONG_DEBOUNCE_COUNT)
 #define DEBOUNCE_OFF (PIN_REFRESH_RATE*SHORT_DEBOUNCE_COUNT)
 
@@ -96,8 +96,23 @@ long time_since_start(trigger_t *pin, long millis)
 	return millis - abs(pin->millis);
 }
 
-trigger_t pin_trigger[NB_OF_PIN];
+long last_time = 0;
+bool pinReady(long current_millis)
+{
+	bool ready = false;
+	if ((current_millis - last_time) > PIN_REFRESH_RATE)
+	{
+		if (last_time != current_millis) 
+		{
+			last_time = current_millis;
+			refreshPin();
+			ready = true;
+		}
+	}
+	return ready;
+}
 
+trigger_t pin_trigger[NB_OF_PIN] = { 0 };
 bool pin_has_changed(long current_millis, short pin_id, short trigger)
 {
 	bool changes = false;
@@ -150,7 +165,7 @@ bool pin_has_changed(long current_millis, short pin_id, short trigger)
 	
 	if(changes)
 	{
-		serial_printf("Key<%d>", pin_id);
+		serial_printf("Key <%d> pressed\n", pin_id);
 	}
 	return changes;
 }
@@ -219,11 +234,11 @@ long feed_time = 0;
 
 my_time_t glb_timer;
 
+#ifdef MAIN
 void setup()
 {
 	lcd_printf("Initializing");
 	serial_printf("Initializing\n");
-	delay(500);
 
 	serial_printf("== Pin\n");
 	setPin(MCU_SRAM_CS, OUTPUT);
@@ -249,22 +264,6 @@ void setup()
 	// setPin(full_switch, INPUT);
 
 
-	writePin(B_feed, HIGH);
-	writePin(B_auto_feed, HIGH);
-	writePin(B_fill, HIGH);
-	writePin(B_Inc, HIGH);
-	writePin(B_Dec, HIGH);
-	// writePin(B_Emergency, HIGH);
-	// writePin(empty_switch, HIGH);
-	// writePin(full_switch, HIGH);
-
-	writePin(LED_auto_feed, LOW);
-	writePin(LED_Inc, LOW);
-	writePin(LED_Dec, LOW);
-	writePin(LED_feed, LOW);
-	writePin(LED_fill, LOW);
-	// writePin(Buzzer, LOW);
-
 	delay(10);
 
 
@@ -278,18 +277,12 @@ void setup()
 				memory.put(MEM_ADDR, 0);
 				mem_feed_time = 0;
 		}
-		serial_printf("Loading feed time from memory <%d>\n", mem_feed_time);
+		serial_printf(" - Loading feed time from memory <%d>\n", mem_feed_time);
 		feed_time = mem_feed_time;
 	}
 	else
 	{
-		serial_printf(
-			"- Error detecting SPI memory.\n"
-			"- Either an incorrect SPI pin was specified,\n"
-			"- or the Microchip memory has been wired incorrectly,\n"
-			"- or it is not a Microchip memory.\nSupported memories are:\n"
-			"23x640, 23x256, 23x512, 23xx1024, 23LCV512 & 23LCV1024"
-		);
+		serial_printf("- Error detecting SPI memory ==\n");
 		feed_time = 0;
 	}
 
@@ -307,8 +300,7 @@ void setup()
 	delay(1000);
 }
 
-bool set_to = LOW;
-long last_time = 0;
+uint8_t set_to = LOW;
 void loop() 
 {
 	_FN_START
@@ -322,19 +314,10 @@ void loop()
 
 	lcd_printf("TIME:\n%02ld:%02ld:%02ld", 
 		glb_timer.hours, glb_timer.minutes, glb_timer.seconds);
-	
-	if ((current_millis - last_time) > PIN_REFRESH_RATE)
-	{
-		last_time = current_millis;
-		refreshPin();
 
-		writePin(LED_auto_feed, set_to);
-		writePin(LED_Inc, set_to);
-		writePin(LED_Dec, set_to);
-		writePin(LED_feed, set_to);
-		writePin(LED_fill, set_to);
-		set_to = ! set_to;
-	
+	if(pinReady(current_millis))
+	{
+
 		// /* Check your limit switch */
 		// if( pin_has_changed(current_millis, empty_switch, HIGH) )
 		// {
@@ -379,7 +362,7 @@ void loop()
 				man_feed = true;
 			}
 		}
- 
+
 		// B_auto_feed has not yet been defined because we haven't decided how to wire extra buttons that were not in the schematic
 		if(pin_has_changed(current_millis, B_auto_feed, LOW))   
 		{
@@ -398,41 +381,184 @@ void loop()
 				fill = true;
 			}
 		}
-		
 	}
 
-	// if( man_feed || auto_feed )
-	// {
+	if( man_feed || auto_feed )
+	{
 
-	// 	/*
-	// 	 *        Main operation happens here:
-	// 	 *        Motor driving, checking stop switches, down-count timer,
-	// 	 *        Buzzer
-	// 	 */
+		/*
+		 *        Main operation happens here:
+		 *        Motor driving, checking stop switches, down-count timer,
+		 *        Buzzer
+		 */
 
-	// 	update_time(&glb_timer, current_millis);
+		update_time(&glb_timer, current_millis);
 		
-	// 	/* store in memeory if necessary */
-	// 	if ( mem_feed_time >= 0 && feed_time != mem_feed_time ) 
-	// 	{  
-	// 			Serial.print("Storing feed time to memory <");
-	// 			Serial.print(feed_time);
-	// 			Serial.println(">");
-	// 			memory.put(MEM_ADDR, feed_time);
-	// 			/* sanity check that we wrote */
-	// 			memory.get(MEM_ADDR, mem_feed_time);
-	// 			if ( mem_feed_time != feed_time ) 
-	// 			{  
-	// 					Serial.print("Unable to store the feed time to memory");
-	// 			}
+		/* store in memeory if necessary */
+		if ( mem_feed_time >= 0 && feed_time != mem_feed_time ) 
+		{  
+				Serial.print("Storing feed time to memory <");
+				Serial.print(feed_time);
+				Serial.println(">");
+				memory.put(MEM_ADDR, feed_time);
+				/* sanity check that we wrote */
+				memory.get(MEM_ADDR, mem_feed_time);
+				if ( mem_feed_time != feed_time ) 
+				{  
+						Serial.print("Unable to store the feed time to memory");
+				}
 
-	// 			mem_feed_time = -1;
-	// 	}
-	// }
-	// else
-	// {
+				mem_feed_time = -1;
+		}
+	}
+	else
+	{
 		/* if it is not running, you can still change the time */
 		set_time(&glb_timer, feed_time / 60, feed_time % 60, 0);
-	// }
+	}
 	_FN_END
 }
+#else
+#ifdef MCP_LED_TEST
+void setup()
+{
+	_FN_START
+
+	serial_printf("Initializing\n");
+	setPin(LED_auto_feed, OUTPUT);
+	setPin(LED_Inc, OUTPUT);
+	setPin(LED_Dec, OUTPUT);
+	setPin(LED_feed, OUTPUT);
+	setPin(LED_fill, OUTPUT);
+	// setPin(Buzzer, OUTPUT);
+	serial_printf("Done\n");
+
+	delay(500);
+	_FN_END
+
+}
+
+uint8_t set_to = LOW;
+void loop()
+{
+	_FN_START
+	writePin(LED_auto_feed, set_to);
+	writePin(LED_Inc, set_to);
+	writePin(LED_Dec, set_to);
+	writePin(LED_feed, set_to);
+	writePin(LED_fill, set_to);
+	refreshPin();
+	set_to = !set_to;
+	delay(500);
+	_FN_END
+}
+#else
+#ifdef MCP_SWITCH_TEST
+void setup()
+{
+	_FN_START
+
+	serial_printf("Initializing\n");
+	setPin(LED_auto_feed, OUTPUT);
+	setPin(LED_Inc, OUTPUT);
+	setPin(LED_Dec, OUTPUT);
+	setPin(LED_feed, OUTPUT);
+	setPin(LED_fill, OUTPUT);
+
+	setPin(B_auto_feed, INPUT);
+	setPin(B_Inc, INPUT);
+	setPin(B_Dec, INPUT);
+	setPin(B_feed, INPUT);
+	setPin(B_fill, INPUT);
+
+	serial_printf("Done\n");
+
+	delay(500);
+	_FN_END
+
+}
+void loop()
+{
+	_FN_START
+
+	refreshPin();
+	writePin(LED_auto_feed, !readPin(B_auto_feed));
+	writePin(LED_Inc, !readPin(B_Inc));
+	writePin(LED_Dec, !readPin(B_Dec));
+	writePin(LED_feed, !readPin(B_feed));
+	writePin(LED_fill, !readPin(B_fill));
+
+	delay(2);
+	_FN_END
+}
+#else
+#ifdef LCD_TEST
+static uint8_t current_value = 0;
+void setup()
+{
+	_FN_START
+	_FN_END
+}
+void loop()
+{
+	_FN_START
+	lcd_printf("Hello World\ncount: %d", current_value);
+	delay(1000);
+	current_value += 1;
+	_FN_END
+}
+#else
+#ifdef LCD_W_BUTTON_TEST
+void setup()
+{
+	_FN_START
+
+	serial_printf("Initializing\n");
+	setPin(LED_auto_feed, OUTPUT);
+	setPin(LED_Inc, OUTPUT);
+	setPin(LED_Dec, OUTPUT);
+	setPin(LED_feed, OUTPUT);
+	setPin(LED_fill, OUTPUT);
+
+	setPin(B_auto_feed, INPUT);
+	setPin(B_Inc, INPUT);
+	setPin(B_Dec, INPUT);
+	setPin(B_feed, INPUT);
+	setPin(B_fill, INPUT);
+
+	serial_printf("Done\n");
+
+	delay(500);
+	_FN_END
+
+}
+void loop()
+{
+	_FN_START
+
+	refreshPin();
+
+	char status[] = {
+		'0' + readPin(B_auto_feed), ' ',
+		'0' + readPin(B_Inc), ' ',
+		'0' + readPin(B_Dec), ' ',
+		'0' + readPin(B_feed), ' ',
+		'0' + readPin(B_fill), ' '
+	};
+	
+	writePin(LED_auto_feed, !readPin(B_auto_feed));
+	writePin(LED_Inc, !readPin(B_Inc));
+	writePin(LED_Dec, !readPin(B_Dec));
+	writePin(LED_feed, !readPin(B_feed));
+	writePin(LED_fill, !readPin(B_fill));
+
+	lcd_printf("GPIO [msb:lsb]\n%s" , status);
+
+	delay(2);
+	_FN_END
+}
+#endif
+#endif
+#endif
+#endif
+#endif

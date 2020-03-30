@@ -9,7 +9,7 @@
 */
 
 /* as per data sheet */
-#define MCP_I2C_ADDR 0x20 
+#define MCP_I2C_ADDR 0x20
 
 enum REG_AB
 {

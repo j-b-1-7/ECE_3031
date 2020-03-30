@@ -9,35 +9,23 @@
 #include "i2c_lcd.h"
 #include "message.h"
 
-#define COMSEND 0x00
-#define DATASEND 0x40
+#include "ST7036.h"
 
-// lcd is 2X20
-#define LCD_LINE_LEN 20
-#define LCD_LINES 2
+ST7036 lcd = ST7036 ( LCD_LINES, LCD_LINE_LEN, LCD_ADDR );
 #define MAX_BUFFER ((LCD_LINE_LEN * LCD_LINES) + 2)
 
+bool _init_lcd = true;
 uint8_t previous_buffer[LCD_LINES][LCD_LINE_LEN];
 
 static void init_LCD()
 {
   _FN_START
-
-  uint8_t packet_1[] = { 0x38, 0x14, 0x70, 0x5E, 0x6D, 0x0C, 0x01, 0x06 };
-  i2c_write(LCD_I2C_ADDR, COMSEND, packet_1, 8);
-  delay(10);
-  
-  uint8_t packet_2[] = { 0x38, 0x40 };
-  i2c_write(LCD_I2C_ADDR, COMSEND, packet_2, 2);
-  delay(10);
-
-  uint8_t packet_3[] = { 0x00, 0x1E, 0x18, 0x14, 0x12, 0x01, 0x00, 0x00 };
-  i2c_write(LCD_I2C_ADDR, COMSEND, packet_3, 8);
-  delay(10);
-
-  uint8_t packet_4[] = { 0x39, 0x01 };
-  i2c_write(LCD_I2C_ADDR, COMSEND, packet_4, 2);
-  delay(10);
+  if(_init_lcd)
+  {
+    _init_lcd = false;
+    lcd.init();
+    lcd.setContrast(10);
+  }
   
   _FN_END
 }
@@ -46,6 +34,8 @@ void lcd_printf(const char * format, ...)
 {
   _FN_START
 
+	init_LCD(); 
+
   char buffer[MAX_BUFFER];
   va_list args;
   va_start (args, format);
@@ -53,7 +43,6 @@ void lcd_printf(const char * format, ...)
   va_end (args);
 
 	/* first we look to see if a different line is sent */
-	bool is_diff = false;
   int i = 0;
   for(int row = 0; row < LCD_LINES; row += 1)
   {
@@ -75,25 +64,16 @@ void lcd_printf(const char * format, ...)
           }
           i += 1;
         }
-
-        if(previous_buffer[row][col] != (uint8_t)c)
-        {
-          is_diff = true;
-        }
       }
-      previous_buffer[row][col] = (uint8_t)c;
+
+      if(previous_buffer[row][col] != (uint8_t)c)
+      {
+        previous_buffer[row][col] = (uint8_t)c;
+        lcd.setCursor(row,col);
+        lcd.write(previous_buffer[row][col]);
+      }
     }
 	}
 
-	// this could go away if we change only one char
-	if(is_diff)
-	{
-		init_LCD(); 
-    i2c_write(LCD_I2C_ADDR, DATASEND, previous_buffer[0], 20);
-    /* new line */
-    uint8_t packet[] = { 0xC0 };
-    i2c_write(LCD_I2C_ADDR, COMSEND, packet, 1);
-    i2c_write(LCD_I2C_ADDR, DATASEND, previous_buffer[1] ,20);
-	}
   _FN_END
 }
