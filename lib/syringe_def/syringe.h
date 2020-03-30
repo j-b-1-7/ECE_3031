@@ -1,7 +1,7 @@
 #ifndef SYRINGE_H
 #define SYRINGE_H
 
-#define DEBUG
+// #define DEBUG
 // #define SLOW_DEBUG
 // #define PRINT_STACK_TRACE
 
@@ -12,7 +12,15 @@
 // #define LCD_W_BUTTON_TEST
 
 #define SERIAL_BAUD_RATE 9600
+
+#ifdef DEBUG
 #define SERIAL_BUFFER_SIZE 256
+#else
+#define SERIAL_BUFFER_SIZE 80
+#endif
+
+#define MIN_FEED_MINUTE 1
+#define MAX_FEED_MINUTE 150 // 2.5 hr. wow such math
 
 enum pins_e
 {

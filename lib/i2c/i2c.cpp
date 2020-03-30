@@ -3,6 +3,11 @@
 
 #include "message.h"
 
+#define HEX_STR "0x%02X"
+constexpr char _unable_to[] = "unable to";
+constexpr char _write[] = "write to";
+constexpr char _read[] = "read from";
+
 static bool _i2c_initialized = false;
 
 static uint8_t _end_transmission(uint8_t dev_addr)
@@ -13,16 +18,16 @@ static uint8_t _end_transmission(uint8_t dev_addr)
         case 0:
             break;
         case 1:
-            serial_printf("\nERROR: data too long to fit in transmit buffer on dev::0x%02X", dev_addr);
+            serial_printf("\n!Buffer Overflow dev" HEX_STR ,dev_addr);
             break;
         case 2:
-            serial_printf("\nERROR: received NACK on transmit of address on dev::0x%02X", dev_addr);
+            serial_printf("\n!NACK dev" HEX_STR, dev_addr);
             break;
         case 3:
-            serial_printf("\nERROR: received NACK on transmit of data on dev::0x%02X", dev_addr);
+            serial_printf("\n!NACK of dev" HEX_STR, dev_addr);
             break;
         default:
-            serial_printf("\nERROR: other error on dev::0x%02X", dev_addr);
+            serial_printf("\n!UNK ERR dev" HEX_STR, dev_addr);
             break;
     }
     return exit_code;
@@ -59,12 +64,7 @@ void i2c_write(uint8_t dev_addr, uint8_t reg_addr, const void* src, uint16_t n_b
         uint8_t *buf = (uint8_t*)src;    
         if( n_byte != (uint16_t)Wire.write(buf, n_byte))
         {
-            debug_printf("Unable to write: ");
-            for (uint16_t i = 0; i < n_byte; i += 1)
-            {
-                debug_printf("0x%02X, ", buf[i]);
-            }
-            debug_printf("\n");
+            serial_printf("%s %s dev" HEX_STR, _unable_to, _write, dev_addr);
         }
         _end_transmission(dev_addr);
     }
@@ -73,7 +73,17 @@ void i2c_write(uint8_t dev_addr, uint8_t reg_addr, const void* src, uint16_t n_b
 
 void i2c_write(uint8_t dev_addr, uint8_t reg_addr, const char* src)
 {
-    i2c_write(dev_addr, reg_addr, src, strlen(src));
+    _FN_START
+
+    if ( 0 == _begin_transmission(dev_addr, reg_addr) )
+    {
+        if( strlen(src) != (uint16_t)Wire.write(src))
+        {
+            serial_printf("%s %s dev" HEX_STR, _unable_to, _write, dev_addr);
+        }
+        _end_transmission(dev_addr);
+    }
+    _FN_END
 }
 
 void i2c_write(uint8_t dev_addr, uint8_t reg_addr, uint8_t value)
@@ -84,7 +94,7 @@ void i2c_write(uint8_t dev_addr, uint8_t reg_addr, uint8_t value)
     {
         if( 1 != Wire.write(value))
         {
-            debug_printf("Unable to write 0x%02X\n", value);
+            serial_printf("%s %s dev" HEX_STR, _unable_to, _write, dev_addr);
         }
         _end_transmission(dev_addr);
     }
@@ -110,7 +120,7 @@ void i2c_read(uint8_t dev_addr, uint8_t reg_addr, void* dest, uint16_t n_byte)
         }
         else
         {
-            debug_printf("Unable to read from device[0x%02X]\n", dev_addr);
+            serial_printf("%s %s dev" HEX_STR, _unable_to, _read, dev_addr);
         }
 
     }
@@ -133,7 +143,7 @@ uint8_t i2c_read(uint8_t dev_addr, uint8_t reg_addr)
         }
         else
         {
-            debug_printf("Unable to read from device[0x%02X]\n", dev_addr);
+            serial_printf("%s %s dev" HEX_STR, _unable_to, _read, dev_addr);
         }     
 
     }

@@ -13,6 +13,7 @@
 #include "message.h"
 
 #define SERIAL_BAUD_RATE 9600
+#define MEM_IS_SET UINT16_MAX
 
 #define PIN_REFRESH_RATE 5
 #define SHORT_DEBOUNCE_COUNT 2
@@ -26,19 +27,19 @@ static MicrochipSRAM memory(MCU_SRAM_CS); // Instantiate the class to the given 
 
 typedef struct my_time_t_t
 {
-	long seconds;
-	long minutes;
-	long hours;
+	uint8_t seconds;
+	uint8_t minutes;
+	uint8_t hours;
 } my_time_t;
 
 typedef struct trigger_t_t
 {
-	long count[2];
-	long millis;
+	uint8_t count[2];
+	uint16_t millis;
 	bool count_up;
 } trigger_t;
 
-long pin_trigger_millis[NB_OF_PIN] = { 0 };
+trigger_t pin_trigger[NB_OF_PIN] = { 0 };
 
 bool man_feed = false;
 bool auto_feed = false;
@@ -57,14 +58,14 @@ void stop_timer(trigger_t *pin)
 	pin->count_up = true;
 }
 
-void start_count_up(trigger_t *pin, long millis)
+void start_count_up(trigger_t *pin, uint16_t millis)
 {
 	init_count(pin);
 	pin->millis = millis;
 	pin->count_up = true;
 }
 
-void start_count_down(trigger_t *pin, long millis)
+void start_count_down(trigger_t *pin, uint16_t millis)
 {
 	init_count(pin);
 	pin->millis = millis;
@@ -91,29 +92,40 @@ void add_timer_count(trigger_t *pin, short type)
 	pin->count[type]+= 1;
 }
 
-long time_since_start(trigger_t *pin, long millis)
+
+uint16_t time_since(uint16_t from, uint16_t to)
 {
-	return millis - abs(pin->millis);
+	if(from > to)
+	{
+		// we overflowed so we count from (previous to max value) + current 
+		return (UINT16_MAX - from) + to;
+	}
+	else
+	{
+		return to - from;
+	}
 }
 
-long last_time = 0;
-bool pinReady(long current_millis)
+uint16_t time_since_start(trigger_t *pin, uint16_t millis)
+{
+	return time_since(pin->millis, millis);
+}
+
+uint16_t last_time = 0;
+bool pinReady(uint16_t current_millis)
 {
 	bool ready = false;
-	if ((current_millis - last_time) > PIN_REFRESH_RATE)
+	if (last_time != current_millis 
+	&& time_since(last_time, current_millis) > PIN_REFRESH_RATE)
 	{
-		if (last_time != current_millis) 
-		{
-			last_time = current_millis;
-			refreshPin();
-			ready = true;
-		}
+		last_time = current_millis;
+		refreshPin();
+		ready = true;
 	}
 	return ready;
 }
 
-trigger_t pin_trigger[NB_OF_PIN] = { 0 };
-bool pin_has_changed(long current_millis, short pin_id, short trigger)
+bool pin_has_changed(uint16_t current_millis, uint8_t pin_id, uint8_t trigger)
 {
 	bool changes = false;
 	uint8_t current_pin = readPin(pin_id);  
@@ -165,7 +177,7 @@ bool pin_has_changed(long current_millis, short pin_id, short trigger)
 	
 	if(changes)
 	{
-		serial_printf("Key <%d> pressed\n", pin_id);
+		serial_printf("Key <%hhu> pressed\n", pin_id);
 	}
 	return changes;
 }
@@ -180,12 +192,12 @@ void add_minute(my_time_t *timer)
 	}
 }
 
-void count_down(long *q)
+void count_down(uint8_t *q)
 {
 	if(q)
 	{
 		*q -= 1;
-		if(*q < 0)
+		if(*q < 0 || *q > 59)
 		{
 			if(q+1)
 			{
@@ -200,8 +212,8 @@ void count_down(long *q)
 	}
 }
 
-long previous_millis = 0;
-void update_time(my_time_t *timer, long current_millis)
+uint16_t previous_millis = 0;
+void update_time(my_time_t *timer, uint16_t current_millis)
 {
 	// we could hit this time slice twice since we run fast
 	// rounding to the closest second, is sufficient
@@ -209,11 +221,11 @@ void update_time(my_time_t *timer, long current_millis)
 	&& (current_millis % 1000) == 0)
 	{
 		previous_millis = current_millis; 
-		count_down((long *)timer);
+		count_down((uint8_t *)timer);
 	}
 }
 
-void set_time(my_time_t *timer, long hour, long minute, long second)
+void set_time(my_time_t *timer, uint8_t hour, uint8_t minute, uint8_t second)
 {
 	timer->hours = hour;
 	timer->minutes = minute;
@@ -229,8 +241,8 @@ bool times_up(my_time_t *timer)
  * This function converts the time in minutes to an ascii value that can be printed to the LCD
  */
 
-long mem_feed_time = -1;
-long feed_time = 0;
+uint16_t mem_feed_time = -1;
+uint16_t feed_time = 0;
 
 my_time_t glb_timer;
 
@@ -238,6 +250,7 @@ my_time_t glb_timer;
 void setup()
 {
 	lcd_printf("Initializing");
+	
 	serial_printf("Initializing\n");
 
 	serial_printf("== Pin\n");
@@ -272,12 +285,13 @@ void setup()
 	{
 		memory.get(MEM_ADDR, mem_feed_time);
 		/* init the memory for the first time */
-		if ( mem_feed_time < 0 || mem_feed_time > 150 ) 
+		if (mem_feed_time < MIN_FEED_MINUTE 
+		|| mem_feed_time > MAX_FEED_MINUTE ) 
 		{  
-				memory.put(MEM_ADDR, 0);
-				mem_feed_time = 0;
+			memory.put(MEM_ADDR, MIN_FEED_MINUTE);
+			mem_feed_time = MIN_FEED_MINUTE;
 		}
-		serial_printf(" - Loading feed time from memory <%d>\n", mem_feed_time);
+		serial_printf(" - Loading feed time from memory <%hu>\n", mem_feed_time);
 		feed_time = mem_feed_time;
 	}
 	else
@@ -300,11 +314,24 @@ void setup()
 	delay(1000);
 }
 
+uint8_t compute_feed_time(uint8_t new_feedtime)
+{
+	if( new_feedtime > MAX_FEED_MINUTE )
+	{
+		new_feedtime = MIN_FEED_MINUTE;
+	}
+	else if( new_feedtime < MIN_FEED_MINUTE  || new_feedtime == MEM_IS_SET )
+	{
+		new_feedtime = MAX_FEED_MINUTE;
+	}
+	return new_feedtime;
+}
+
 uint8_t set_to = LOW;
 void loop() 
 {
 	_FN_START
-	long current_millis = millis();
+	uint16_t current_millis = millis();
 	
 	if(times_up(&glb_timer))
 	{
@@ -312,7 +339,7 @@ void loop()
 		man_feed = false;
 	}
 
-	lcd_printf("TIME:\n%02ld:%02ld:%02ld", 
+	lcd_printf("TIME:\n%02hu:%02hu:%02hu", 
 		glb_timer.hours, glb_timer.minutes, glb_timer.seconds);
 
 	if(pinReady(current_millis))
@@ -340,7 +367,7 @@ void loop()
 		{
 			if ( ! man_feed && ! auto_feed && ! fill )
 			{
-				feed_time += 1;
+				feed_time = compute_feed_time(feed_time + 1);
 				writePin(LED_Inc, HIGH);
 			}
 		}
@@ -350,7 +377,7 @@ void loop()
 		{
 			if ( ! man_feed && ! auto_feed && ! fill )
 			{
-				feed_time -= 1;
+				feed_time = compute_feed_time(feed_time - 1);
 			}
 		}
 
@@ -395,20 +422,22 @@ void loop()
 		update_time(&glb_timer, current_millis);
 		
 		/* store in memeory if necessary */
-		if ( mem_feed_time >= 0 && feed_time != mem_feed_time ) 
+		if ( mem_feed_time != MEM_IS_SET && feed_time != mem_feed_time ) 
 		{  
-				Serial.print("Storing feed time to memory <");
-				Serial.print(feed_time);
-				Serial.println(">");
-				memory.put(MEM_ADDR, feed_time);
-				/* sanity check that we wrote */
-				memory.get(MEM_ADDR, mem_feed_time);
-				if ( mem_feed_time != feed_time ) 
-				{  
-						Serial.print("Unable to store the feed time to memory");
-				}
+			serial_printf("Storing feed time to memory <%hu>: ", feed_time);
+			memory.put(MEM_ADDR, feed_time);
+			/* sanity check that we wrote */
+			memory.get(MEM_ADDR, mem_feed_time);
+			if ( mem_feed_time != feed_time ) 
+			{  
+				serial_printf("Error\n");
+			}
+			else
+			{
+				serial_printf("Done\n");
+			}
 
-				mem_feed_time = -1;
+			mem_feed_time = MEM_IS_SET;
 		}
 	}
 	else
@@ -502,7 +531,7 @@ void setup()
 void loop()
 {
 	_FN_START
-	lcd_printf("Hello World\ncount: %d", current_value);
+	lcd_printf("Hello World\ncount: %hhu", current_value);
 	delay(1000);
 	current_value += 1;
 	_FN_END

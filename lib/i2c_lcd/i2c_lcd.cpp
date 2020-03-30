@@ -35,7 +35,7 @@ void lcd_printf(const char * format, ...)
   _FN_START
 
 	init_LCD(); 
-
+  
   char buffer[MAX_BUFFER];
   va_list args;
   va_start (args, format);
