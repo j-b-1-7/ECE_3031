@@ -3,6 +3,8 @@
 
 #include <Arduino.h>
 
+#define PIN_REFRESH_RATE 5
+
 void refreshPin();
 
 void setPin(uint8_t pin, uint8_t val);

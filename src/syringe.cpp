@@ -14,15 +14,6 @@
 
 #define SERIAL_BAUD_RATE 9600
 #define MEM_IS_SET UINT16_MAX
-
-#define PIN_REFRESH_RATE 5
-#define SHORT_DEBOUNCE_COUNT 2
-#define LONG_DEBOUNCE_COUNT 5
-#define DEBOUNCE_ON (PIN_REFRESH_RATE*LONG_DEBOUNCE_COUNT)
-#define DEBOUNCE_OFF (PIN_REFRESH_RATE*SHORT_DEBOUNCE_COUNT)
-
-static MicrochipSRAM memory(MCU_SRAM_CS); // Instantiate the class to the given pin
-
 #define MEM_ADDR 0x100
 
 typedef struct my_time_t_t
@@ -31,99 +22,20 @@ typedef struct my_time_t_t
 	uint8_t minutes;
 	uint8_t hours;
 } my_time_t;
+static MicrochipSRAM memory(MCU_SRAM_CS); // Instantiate the class to the given pin
 
-typedef struct trigger_t_t
-{
-	uint8_t count[2];
-	uint16_t millis;
-	bool count_up;
-} trigger_t;
-
-trigger_t pin_trigger[NB_OF_PIN] = { 0 };
+static debouncedPin increment_button;
+static debouncedPin decrement_button;
+static debouncedPin autofeed_button;
+static debouncedPin manfeed_button;
+static debouncedPin manfill_button;
 
 bool man_feed = false;
 bool auto_feed = false;
 bool fill = false;
-
-void init_count(trigger_t *pin)
-{
-	pin->count[0] = 0;
-	pin->count[1] = 0;
-}
-
-void stop_timer(trigger_t *pin)
-{
-	init_count(pin);
-	pin->millis = 0;
-	pin->count_up = true;
-}
-
-void start_count_up(trigger_t *pin, uint16_t millis)
-{
-	init_count(pin);
-	pin->millis = millis;
-	pin->count_up = true;
-}
-
-void start_count_down(trigger_t *pin, uint16_t millis)
-{
-	init_count(pin);
-	pin->millis = millis;
-	pin->count_up = false;
-}
-
-bool timer_is_counting_up(trigger_t *pin)
-{
-	return pin->count_up;
-}
-
-bool timer_is_started(trigger_t *pin)
-{
-	return (pin->millis > 0);
-}
-
-bool timer_is_type(trigger_t *pin, short type)
-{
-	return (pin->count[type] >pin->count[!type]);
-}
-
-void add_timer_count(trigger_t *pin, short type)
-{
-	pin->count[type]+= 1;
-}
-
-
-uint16_t time_since(uint16_t from, uint16_t to)
-{
-	if(from > to)
-	{
-		// we overflowed so we count from (previous to max value) + current 
-		return (UINT16_MAX - from) + to;
-	}
-	else
-	{
-		return to - from;
-	}
-}
-
-uint16_t time_since_start(trigger_t *pin, uint16_t millis)
-{
-	return time_since(pin->millis, millis);
-}
-
-uint16_t last_time = 0;
-bool pinReady(uint16_t current_millis)
-{
-	bool ready = false;
-	if (last_time != current_millis 
-	&& time_since(last_time, current_millis) > PIN_REFRESH_RATE)
-	{
-		last_time = current_millis;
-		refreshPin();
-		ready = true;
-	}
-	return ready;
-}
+uint16_t mem_feed_time = -1;
+uint16_t feed_time = 0;
+my_time_t glb_timer;
 
 /**
  * we check that either case ( Normally off is on or Normally on if off )
@@ -134,63 +46,6 @@ bool SR_latch_state_is(uint16_t current_millis, uint8_t pin_id_NC, uint8_t pin_i
 	uint8_t current_pin_NO = readPin(pin_id_NO); 
 
 	return (current_pin_NC != trigger || current_pin_NO == trigger);
-}
-
-bool pin_has_changed(uint16_t current_millis, uint8_t pin_id, uint8_t trigger)
-{
-	bool changes = false;
-	uint8_t current_pin = readPin(pin_id);  
-
-	// if we were waiting for an event
-	if (! timer_is_started(&pin_trigger[pin_id]))
-	{
-		// if the event happened
-		if (current_pin == trigger)
-		{    
-			// start the debouncer
-			start_count_up(&pin_trigger[pin_id], current_millis);
-		}
-	}
-	else
-	{
-		// we add the current type (HIGH,LOW) to the counter to average later
-		add_timer_count(&pin_trigger[pin_id], current_pin);
-
-		// if we are looking for a rising edge
-		if(timer_is_counting_up(&pin_trigger[pin_id]))
-		{
-			// if we are past the debounce period
-			if (time_since_start(&pin_trigger[pin_id], current_millis) > DEBOUNCE_ON)
-			{
-				// average the pin, if we see high more often than its a key press
-				changes = timer_is_type(&pin_trigger[pin_id], trigger);
-				// send the key press and then start looking for a falling edge
-				start_count_down(&pin_trigger[pin_id], current_millis);
-			}
-		}
-		else
-		{
-			// if we are past the debounce period
-			if (time_since_start(&pin_trigger[pin_id], current_millis) > DEBOUNCE_OFF)
-			{
-				// we wait for a falling edge and prevent quick double press
-				if(! timer_is_type(&pin_trigger[pin_id], trigger))
-				{
-					// we reset the timer
-					stop_timer(&pin_trigger[pin_id]);
-				}
-				// we count again
-				init_count(&pin_trigger[pin_id]);
-
-			}
-		}
-	}
-	
-	if(changes)
-	{
-		serial_printf("Key <%hhu> pressed\n", pin_id);
-	}
-	return changes;
 }
 
 void add_minute(my_time_t *timer)
@@ -223,9 +78,10 @@ void count_down(uint8_t *q)
 	}
 }
 
-uint16_t previous_millis = 0;
 void update_time(my_time_t *timer, uint16_t current_millis)
 {
+	static uint16_t previous_millis = 0;
+
 	// we could hit this time slice twice since we run fast
 	// rounding to the closest second, is sufficient
 	if( current_millis != previous_millis
@@ -248,15 +104,6 @@ bool times_up(my_time_t *timer)
 	return (timer->seconds <= 0 && timer->minutes <= 0 && timer->hours <= 0);
 }
 
-/*
- * This function converts the time in minutes to an ascii value that can be printed to the LCD
- */
-
-uint16_t mem_feed_time = -1;
-uint16_t feed_time = 0;
-
-my_time_t glb_timer;
-
 #ifdef MAIN
 void setup()
 {
@@ -278,19 +125,18 @@ void setup()
 	setPin(Buzzer, OUTPUT);
 
 	// Set the default pin value
-	setPin(B_feed, INPUT);
-	setPin(B_auto_feed, INPUT);
-	setPin(B_fill, INPUT);
-	setPin(B_Inc, INPUT);
-	setPin(B_Dec, INPUT);
+	increment_button.set_pin(B_Inc);
+	decrement_button.set_pin(B_Dec);
+	autofeed_button.set_pin(B_auto_feed);
+	manfeed_button.set_pin(B_feed);
+	manfill_button.set_pin(B_fill);
+
 	setPin(B_Emergency_NC, INPUT);
 	setPin(B_Emergency_NO, INPUT);
 	setPin(empty_switch_NC, INPUT);
 	setPin(empty_switch_NO, INPUT);
 	setPin(full_switch_NC, INPUT);
 	setPin(full_switch_NO, INPUT);
-
-
 
 	delay(10);
 
@@ -344,56 +190,47 @@ uint8_t compute_feed_time(uint8_t new_feedtime)
 	return new_feedtime;
 }
 
-uint8_t set_to = LOW;
-
 void loop() 
 {
 
 	_FN_START
+	static bool restart = true;
+	static bool was_filled = false;
+
 	uint16_t current_millis = millis();
-	
-	if(times_up(&glb_timer))
+	const char *status = NULL;
+	refreshPin();
+	refresh_debounced_pins();
+
+	if(initial_start)
 	{
 		auto_feed = false;
 		man_feed = false;
+		fill = false;
 		tone(Buzzer, 2250, 1000);
+		initial_start = false;
 	}
-
-
-
-	if(SR_latch_state_is(current_millis, B_Emergency_NC, B_Emergency_NO, HIGH) )
+	else if( ! SR_latch_state_is(current_millis, B_Emergency_NC, B_Emergency_NO, HIGH) )
 	{
-		lcd_printf("Emergency pressed!\nTIME: %02hu:%02hu:%02hu", 
-			glb_timer.hours, glb_timer.minutes, glb_timer.seconds);
-	}
-	else if(pinReady(current_millis))
-	{
-		lcd_printf("TIME: %02hu:%02hu:%02hu", 
-			glb_timer.hours, glb_timer.minutes, glb_timer.seconds);
-
-		/* Check your limit switch */
-		if(SR_latch_state_is(current_millis, empty_switch_NC, empty_switch_NO, HIGH) )
+		if ( SR_latch_state_is(current_millis, full_switch_NC, full_switch_NO, LOW) )
 		{
-
+			was_filled = true;
 		}
-
-		if(SR_latch_state_is(current_millis, full_switch_NC, full_switch_NO, HIGH) )
+		else if( SR_latch_state_is(current_millis, empty_switch_NC, empty_switch_NO, LOW) )
 		{
-
+			was_filled = false;
 		}
 
 		/* CHECK_TIMER_BUTTONS */
-		if( pin_has_changed(current_millis, B_Inc, LOW) )
+		if( increment_button.is_falling_edge() )
 		{
 			if ( ! man_feed && ! auto_feed && ! fill )
 			{
 				feed_time = compute_feed_time(feed_time + 1);
-				writePin(LED_Inc, HIGH);
 			}
 		}
 
-
-		if( pin_has_changed(current_millis, B_Dec, LOW) )
+		if( decrement_button.is_falling_edge() )
 		{
 			if ( ! man_feed && ! auto_feed && ! fill )
 			{
@@ -401,33 +238,25 @@ void loop()
 			}
 		}
 
-		/* CHECK_FEED_BUTTON */
-		if(pin_has_changed(current_millis, B_feed, LOW))     
-		{
-			if ( ! auto_feed && ! fill )
-			{
-				man_feed = true;
-			}
-		}
-
-		// B_auto_feed has not yet been defined because we haven't decided how to wire extra buttons that were not in the schematic
-		if(pin_has_changed(current_millis, B_auto_feed, LOW))   
+		if( autofeed_button.is_falling_edge() )
 		{
 			if ( ! man_feed && ! fill )
 			{
 				auto_feed = true;
 			}
 		}
+		
+		man_feed = (
+			! auto_feed && 
+			! fill && 
+			manfeed_button.is_high()
+		);
 
-
-		/* CHECK_FILL_BUTTON */
-		if(pin_has_changed(current_millis, B_fill, LOW))
-		{
-			if ( ! auto_feed && ! man_feed)
-			{
-				fill = true;
-			}
-		}
+		fill = (
+			! auto_feed && 
+			! man_feed && 
+			manfill_button.is_high()
+		);
 	}
 
 	if( man_feed || auto_feed )
@@ -440,31 +269,64 @@ void loop()
 		 */
 
 		update_time(&glb_timer, current_millis);
-		
-		/* store in memeory if necessary */
-		if ( mem_feed_time != MEM_IS_SET && feed_time != mem_feed_time ) 
-		{  
-			serial_printf("Storing feed time to memory <%hu>: ", feed_time);
-			memory.put(MEM_ADDR, feed_time);
-			/* sanity check that we wrote */
-			memory.get(MEM_ADDR, mem_feed_time);
-			if ( mem_feed_time != feed_time ) 
-			{  
-				serial_printf("Error\n");
-			}
-			else
-			{
-				serial_printf("Done\n");
-			}
 
-			mem_feed_time = MEM_IS_SET;
+		if( ! SR_latch_state_is(current_millis, empty_switch_NC, empty_switch_NO, HIGH) 
+		&& ! times_up(&glb_timer) )
+		{
+			/* store in memeory if necessary */
+			if ( mem_feed_time != MEM_IS_SET && feed_time != mem_feed_time ) 
+			{  
+				serial_printf("Storing feed time to memory <%hu>: ", feed_time);
+				memory.put(MEM_ADDR, feed_time);
+				/* sanity check that we wrote */
+				memory.get(MEM_ADDR, mem_feed_time);
+				if ( mem_feed_time != feed_time ) 
+				{  
+					serial_printf("Error\n");
+				}
+				else
+				{
+					serial_printf("Done\n");
+				}
+
+				mem_feed_time = MEM_IS_SET;
+			}
 		}
+		else
+		{
+			restart = true;
+		}
+	}
+	else if (fill)
+	{
+		if( ! SR_latch_state_is(current_millis, full_switch_NC, full_switch_NO, HIGH) )
+		{
+			// drive the motor
+		}
+		else
+		{
+			restart = true;
+			was_filled = true;
+		}
+		
 	}
 	else
 	{
 		/* if it is not running, you can still change the time */
 		set_time(&glb_timer, feed_time / 60, feed_time % 60, 0);
 	}
+
+	/**
+	 * update the Displayables
+	 */
+	writePin(LED_Inc,increment_button.is_low());
+	writePin(LED_Dec,decrement_button.is_low());
+	writePin(LED_Fill,manfill_button.is_low());
+	writePin(LED_Feed,manfeed_button.is_low());
+	writePin(LED_auto_feed,auto_feed);
+	lcd_printf("%s\nTIME(h:m:s): %02hu:%02hu:%02hu", 
+		status, glb_timer.hours, glb_timer.minutes, glb_timer.seconds);
+
 	_FN_END
 }
 #else
