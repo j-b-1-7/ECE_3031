@@ -125,6 +125,17 @@ bool pinReady(uint16_t current_millis)
 	return ready;
 }
 
+/**
+ * we check that either case ( Normally off is on or Normally on if off )
+ */
+bool SR_latch_state_is(uint16_t current_millis, uint8_t pin_id_NC, uint8_t pin_id_NO, uint8_t trigger)
+{
+	uint8_t current_pin_NC = readPin(pin_id_NC);  
+	uint8_t current_pin_NO = readPin(pin_id_NO); 
+
+	return (current_pin_NC != trigger || current_pin_NO == trigger);
+}
+
 bool pin_has_changed(uint16_t current_millis, uint8_t pin_id, uint8_t trigger)
 {
 	bool changes = false;
@@ -264,7 +275,7 @@ void setup()
 	setPin(LED_Dec, OUTPUT);
 	setPin(LED_feed, OUTPUT);
 	setPin(LED_fill, OUTPUT);
-	// setPin(Buzzer, OUTPUT);
+	setPin(Buzzer, OUTPUT);
 
 	// Set the default pin value
 	setPin(B_feed, INPUT);
@@ -272,9 +283,13 @@ void setup()
 	setPin(B_fill, INPUT);
 	setPin(B_Inc, INPUT);
 	setPin(B_Dec, INPUT);
-	// setPin(B_Emergency, INPUT);
-	// setPin(empty_switch, INPUT);
-	// setPin(full_switch, INPUT);
+	setPin(B_Emergency_NC, INPUT);
+	setPin(B_Emergency_NO, INPUT);
+	setPin(empty_switch_NC, INPUT);
+	setPin(empty_switch_NO, INPUT);
+	setPin(full_switch_NC, INPUT);
+	setPin(full_switch_NO, INPUT);
+
 
 
 	delay(10);
@@ -312,6 +327,8 @@ void setup()
 	fill = false;
 
 	delay(1000);
+
+	tone(Buzzer, 1750, 150);
 }
 
 uint8_t compute_feed_time(uint8_t new_feedtime)
@@ -328,8 +345,10 @@ uint8_t compute_feed_time(uint8_t new_feedtime)
 }
 
 uint8_t set_to = LOW;
+
 void loop() 
 {
+
 	_FN_START
 	uint16_t current_millis = millis();
 	
@@ -337,30 +356,31 @@ void loop()
 	{
 		auto_feed = false;
 		man_feed = false;
+		tone(Buzzer, 2250, 1000);
 	}
 
-	lcd_printf("TIME:\n%02hu:%02hu:%02hu", 
-		glb_timer.hours, glb_timer.minutes, glb_timer.seconds);
 
-	if(pinReady(current_millis))
+
+	if(SR_latch_state_is(current_millis, B_Emergency_NC, B_Emergency_NO, HIGH) )
 	{
+		lcd_printf("Emergency pressed!\nTIME: %02hu:%02hu:%02hu", 
+			glb_timer.hours, glb_timer.minutes, glb_timer.seconds);
+	}
+	else if(pinReady(current_millis))
+	{
+		lcd_printf("TIME: %02hu:%02hu:%02hu", 
+			glb_timer.hours, glb_timer.minutes, glb_timer.seconds);
 
-		// /* Check your limit switch */
-		// if( pin_has_changed(current_millis, empty_switch, HIGH) )
-		// {
+		/* Check your limit switch */
+		if(SR_latch_state_is(current_millis, empty_switch_NC, empty_switch_NO, HIGH) )
+		{
 
-		// }
+		}
 
-		// if( pin_has_changed(current_millis, full_switch, HIGH) )
-		// {
+		if(SR_latch_state_is(current_millis, full_switch_NC, full_switch_NO, HIGH) )
+		{
 
-		// }
-
-		// /* Check the emergency button */
-		// if( pin_has_changed(current_millis, B_Emergency, HIGH) )
-		// {
-
-		// }
+		}
 
 		/* CHECK_TIMER_BUTTONS */
 		if( pin_has_changed(current_millis, B_Inc, LOW) )
