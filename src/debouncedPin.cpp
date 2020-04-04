@@ -41,49 +41,89 @@ bool debouncedPin::_timer_is_started()
 	return (this->_millis > 0);
 }
 
+/**
+ * software SR latch circuit
+ * 
+ *   S --|``-.
+ *       |    o--,-----q
+ *    ,--|..-`  /
+ *    |        /
+ *    |_______/_
+ *   ,-------'  |
+ *   '--|``-.   |
+ *      |    o--'not_q
+ *  R --|..-`
+ */
+static bool SR_debounce(uint8_t s, uint8_t r, uint8_t q)
+{
+	uint8_t not_q = ! (q || r);
+	return  ! (s || not_q );
+}
+
 void debouncedPin::_refresh()
 {
 	if(cycle_id != this->_last_cycle_checked)
 	{
 		this->_last_cycle_checked = cycle_id;
 
-		uint8_t pin_value = readPin(this->_pin_id);  
-
-		// if we were waiting for an event
-		if ( ! this->_timer_is_started() )
+		/* default pin is normally open */
+		uint8_t pin_value = readPin(this->_pin_id_no);
+		/* check if normally closed pin was set for double throw switches */
+		if(this->_pin_id_nc)
 		{
-			// if the event happened
-			if (pin_value != this->_state)
-			{    
-				// start the debouncer
-				this->_start_timer();
-			}
+			/**
+			 *  grab the value using SR debounce for failsafe
+			 * if we have a double throw switch 
+			 */
+			uint8_t new_state = SR_debounce(
+				pin_value,
+				readPin(this->_pin_id_nc),
+				this->_state
+			);
+
+			this->_changed = (this->_state != new_state);
+			this->_state = new_state;
+
 		}
+		/* this is a single throw switch so we need to buffer to debounce */
 		else
 		{
-			// we add the current type (HIGH,LOW) to the counter to average later
-			this->_count[pin_value] += 1;
-
-			// if we are past the debounce period
-			if (time_since(this->_millis) > DEBOUNCE_TIME)
+			// if we were waiting for an event
+			if ( ! this->_timer_is_started() )
 			{
-				// assume low
-				uint8_t new_state = LOW;
-				if(this->_count[LOW] < this->_count[HIGH])
-				{
-					new_state = HIGH;
+				// if the event happened
+				if (pin_value != this->_state)
+				{    
+					// start the debouncer
+					this->_start_timer();
 				}
+			}
+			else
+			{
+				// we add the current type (HIGH,LOW) to the counter to average later
+				this->_count[pin_value] += 1;
 
-				this->_changed = (this->_state != new_state);
-				this->_state = new_state;
-
-				if(this->_changed)
+				// if we are past the debounce period
+				if (time_since(this->_millis) > DEBOUNCE_TIME)
 				{
-					debug_printf("button %02hu %s\n", this->_pin_id, (this->_state)? "HIGH": "LOW");
-				}
+					// assume low
+					uint8_t new_state = LOW;
+					if(this->_count[LOW] < this->_count[HIGH])
+					{
+						new_state = HIGH;
+					}
 
-				// we reset the timer
-				this->_stop_timer();
+					this->_changed = (this->_state != new_state);
+					this->_state = new_state;
+
+					if(this->_changed)
+					{
+						debug_printf("button %02hu %s\n", this->_pin_id_no, (this->_state)? "HIGH": "LOW");
+					}
+
+					// we reset the timer
+					this->_stop_timer();
+				}
 			}
 		}
 	}
@@ -91,8 +131,16 @@ void debouncedPin::_refresh()
 
 void debouncedPin::set_pin(uint8_t pin_id)
 {
-	this->_pin_id = pin_id;
-    setPin(this->_pin_id, INPUT);
+	this->_pin_id_no = pin_id;
+    setPin(this->_pin_id_no, INPUT);
+}
+
+void debouncedPin::set_pin(uint8_t pin_id_nc, uint8_t pin_id_no)
+{
+	this->_pin_id_nc = pin_id_nc;
+    setPin(this->_pin_id_nc, INPUT);
+	this->_pin_id_no = pin_id_no;
+    setPin(this->_pin_id_no, INPUT);
 }
 
 uint8_t debouncedPin::is_high()

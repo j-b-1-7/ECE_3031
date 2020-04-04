@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "debouncedPin.h"
 #include "MicrochipSRAM.h"
 #include "pin_wrapper.h"
 #include "i2c_lcd.h"
@@ -30,9 +31,6 @@ static debouncedPin autofeed_button;
 static debouncedPin manfeed_button;
 static debouncedPin manfill_button;
 
-bool man_feed = false;
-bool auto_feed = false;
-bool fill = false;
 uint16_t mem_feed_time = -1;
 uint16_t feed_time = 0;
 my_time_t glb_timer;
@@ -45,7 +43,7 @@ bool SR_latch_state_is(uint16_t current_millis, uint8_t pin_id_NC, uint8_t pin_i
 	uint8_t current_pin_NC = readPin(pin_id_NC);  
 	uint8_t current_pin_NO = readPin(pin_id_NO); 
 
-	return (current_pin_NC != trigger || current_pin_NO == trigger);
+	return (current_pin_NC != trigger && current_pin_NO == trigger);
 }
 
 void add_minute(my_time_t *timer)
@@ -130,13 +128,9 @@ void setup()
 	autofeed_button.set_pin(B_auto_feed);
 	manfeed_button.set_pin(B_feed);
 	manfill_button.set_pin(B_fill);
-
-	setPin(B_Emergency_NC, INPUT);
-	setPin(B_Emergency_NO, INPUT);
-	setPin(empty_switch_NC, INPUT);
-	setPin(empty_switch_NO, INPUT);
-	setPin(full_switch_NC, INPUT);
-	setPin(full_switch_NO, INPUT);
+	emergency_button.set_pin(B_Emergency_NC, B_Emergency_NO);
+	full_switch.set_pin(empty_switch_NC, empty_switch_NO);
+	empty_switch.set_pin(full_switch_NC, full_switch_NO);
 
 	delay(10);
 
@@ -160,21 +154,6 @@ void setup()
 		serial_printf("- Error detecting SPI memory ==\n");
 		feed_time = 0;
 	}
-
-	serial_printf("== Timers\n");
-	set_time(&glb_timer, feed_time/60, feed_time%60, 0);
-	// reset all the timers
-	for(int i=0; i < NB_OF_PIN; i++)
-	{
-	  stop_timer(&pin_trigger[i]);
-	}
-	man_feed = false;
-	auto_feed = false;
-	fill = false;
-
-	delay(1000);
-
-	tone(Buzzer, 1750, 150);
 }
 
 uint8_t compute_feed_time(uint8_t new_feedtime)
@@ -190,142 +169,166 @@ uint8_t compute_feed_time(uint8_t new_feedtime)
 	return new_feedtime;
 }
 
+enum states_e { 
+	/* refresh */
+	RESTARTING,
+	/* can read most IO */
+	IDLE, 
+	/* transistion phase, lock most IO */
+	AUTO_FEED, /* empty -> IDLE_EMPTY
+	MANUAL_FEED,
+	MANUAL_FILL,
+	/* Stop the world, something gone baaaad */
+	EMERGENCY_STOP
+};
+
+static const char *states[] = {
+	"Restarting",
+	"Idle",
+	"Automatic Feeding",
+	"Manual Feeding",
+	"Manual Refill",
+	"== EMERGENCY STOP =="
+};
+
 void loop() 
 {
-
 	_FN_START
-	static bool restart = true;
-	static bool was_filled = false;
+	static states_e current_state = RESTARTING;
+	static bool has_content = false;
 
 	uint16_t current_millis = millis();
-	const char *status = NULL;
 	refreshPin();
 	refresh_debounced_pins();
 
-	if(initial_start)
+	/* always check this switch */
+	if ( full_switch.is_high() )
 	{
-		auto_feed = false;
-		man_feed = false;
-		fill = false;
-		tone(Buzzer, 2250, 1000);
-		initial_start = false;
-	}
-	else if( ! SR_latch_state_is(current_millis, B_Emergency_NC, B_Emergency_NO, HIGH) )
-	{
-		if ( SR_latch_state_is(current_millis, full_switch_NC, full_switch_NO, LOW) )
-		{
-			was_filled = true;
-		}
-		else if( SR_latch_state_is(current_millis, empty_switch_NC, empty_switch_NO, LOW) )
-		{
-			was_filled = false;
-		}
-
-		/* CHECK_TIMER_BUTTONS */
-		if( increment_button.is_falling_edge() )
-		{
-			if ( ! man_feed && ! auto_feed && ! fill )
-			{
-				feed_time = compute_feed_time(feed_time + 1);
-			}
-		}
-
-		if( decrement_button.is_falling_edge() )
-		{
-			if ( ! man_feed && ! auto_feed && ! fill )
-			{
-				feed_time = compute_feed_time(feed_time - 1);
-			}
-		}
-
-		if( autofeed_button.is_falling_edge() )
-		{
-			if ( ! man_feed && ! fill )
-			{
-				auto_feed = true;
-			}
-		}
-		
-		man_feed = (
-			! auto_feed && 
-			! fill && 
-			manfeed_button.is_high()
-		);
-
-		fill = (
-			! auto_feed && 
-			! man_feed && 
-			manfill_button.is_high()
-		);
+		has_content = true;
 	}
 
-	if( man_feed || auto_feed )
+	// always check this switch
+	if( empty_switch.is_high() )
 	{
+		has_content = false;
+	}
 
-		/*
-		 *        Main operation happens here:
-		 *        Motor driving, checking stop switches, down-count timer,
-		 *        Buzzer
-		 */
-
-		update_time(&glb_timer, current_millis);
-
-		if( ! SR_latch_state_is(current_millis, empty_switch_NC, empty_switch_NO, HIGH) 
-		&& ! times_up(&glb_timer) )
+	// always check this switch
+	if( emergency_button.is_high() )
+	{
+		switch(current_state)
 		{
-			/* store in memeory if necessary */
-			if ( mem_feed_time != MEM_IS_SET && feed_time != mem_feed_time ) 
-			{  
-				serial_printf("Storing feed time to memory <%hu>: ", feed_time);
-				memory.put(MEM_ADDR, feed_time);
-				/* sanity check that we wrote */
-				memory.get(MEM_ADDR, mem_feed_time);
-				if ( mem_feed_time != feed_time ) 
+			case IDLE:
+			{
+				if( increment_button.is_falling_edge() )
+				{
+					feed_time = compute_feed_time(feed_time + 1);
+				}
+
+				if( decrement_button.is_falling_edge() )
+				{
+					feed_time = compute_feed_time(feed_time - 1);
+				}
+
+				// there is precedence here, autofeed takes priority
+				if( autofeed_button.is_falling_edge() )
+				{
+					current_state = AUTO_FEED;
+				}
+				else if ( manfeed_button.is_falling_edge() )
+				{
+					current_state = MANUAL_FEED;
+				}
+				else if ( manfill_button.is_falling_edge() )
+				{
+					current_state = MANUAL_FILL;
+				}
+
+				/* if it is not running, you can change the time */
+				set_time(&glb_timer, feed_time / 60, feed_time % 60, 0);
+
+				break;
+			}
+			case MANUAL_FEED:
+			case AUTO_FEED:
+			{
+				/* store in memory if necessary */
+				if ( mem_feed_time != MEM_IS_SET && feed_time != mem_feed_time ) 
 				{  
-					serial_printf("Error\n");
+					serial_printf("Storing feed time to memory <%hu>: ", feed_time);
+					memory.put(MEM_ADDR, feed_time);
+					/* sanity check that we wrote */
+					memory.get(MEM_ADDR, mem_feed_time);
+					if ( mem_feed_time != feed_time ) 
+					{  
+						serial_printf("Error\n");
+					}
+					else
+					{
+						serial_printf("Done\n");
+					}
+
+					mem_feed_time = MEM_IS_SET;
+				}
+
+				// check that the button is still pressed
+				if ( current_state == MANUAL_FEED && manfeed_button.is_high() )
+				{
+					current_state = IDLE;
+				}
+				else if( times_up(&glb_timer) )
+				{
+					current_state = RESTARTING;
+				}
+				else if(! has_content)
+				{
+					current_state = RESTARTING;
 				}
 				else
 				{
-					serial_printf("Done\n");
+					/* drive the motor */
 				}
 
-				mem_feed_time = MEM_IS_SET;
+				/* count down the time */
+				update_time(&glb_timer, current_millis);
+
+				break;
+			}
+			case MANUAL_FILL:
+			{
+				if(full_switch.is_high())
+				{
+					current_state = IDLE;
+				}
+				else if( manfill_button.is_high() )
+				{
+					current_state = IDLE;
+				}
+				else
+				{
+					/* drive the motor */
+				}
+			}
+			default:
+			{
+				tone(Buzzer, 2250, 1000);
+				current_state = IDLE;
+				break;
 			}
 		}
-		else
-		{
-			restart = true;
-		}
 	}
-	else if (fill)
-	{
-		if( ! SR_latch_state_is(current_millis, full_switch_NC, full_switch_NO, HIGH) )
-		{
-			// drive the motor
-		}
-		else
-		{
-			restart = true;
-			was_filled = true;
-		}
-		
-	}
-	else
-	{
-		/* if it is not running, you can still change the time */
-		set_time(&glb_timer, feed_time / 60, feed_time % 60, 0);
-	}
+
 
 	/**
 	 * update the Displayables
 	 */
 	writePin(LED_Inc,increment_button.is_low());
 	writePin(LED_Dec,decrement_button.is_low());
-	writePin(LED_Fill,manfill_button.is_low());
-	writePin(LED_Feed,manfeed_button.is_low());
+	writePin(LED_fill,manfill_button.is_low());
+	writePin(LED_feed,manfeed_button.is_low());
 	writePin(LED_auto_feed,auto_feed);
 	lcd_printf("%s\nTIME(h:m:s): %02hu:%02hu:%02hu", 
-		status, glb_timer.hours, glb_timer.minutes, glb_timer.seconds);
+		states[current_state], glb_timer.hours, glb_timer.minutes, glb_timer.seconds);
 
 	_FN_END
 }
