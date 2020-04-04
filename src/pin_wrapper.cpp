@@ -39,50 +39,50 @@ void refreshPin()
 
 void setPin(uint8_t pin, uint8_t val)
 {
-	if(pin < EXP_A_START)
+	if(pin < A_ROW_EXPENDER)
 	{
 		pinMode(pin, val);
 	}
-	else if (pin < EXP_B_START)
+	else if (pin < B_ROW_EXPENDER)
 	{
-		mcp_set(A, pin-EXP_A_START, val);
+		mcp_set(A, pin-A_ROW_EXPENDER, val);
 	}
 	else
 	{
-		mcp_set(B, pin-EXP_B_START, val);
+		mcp_set(B, pin-B_ROW_EXPENDER, val);
 	}
 }
 
 uint8_t readPin(uint8_t pin)
 {
 	uint8_t val = 0x0;
-	if(pin < EXP_A_START)
+	if(pin < A_ROW_EXPENDER)
 	{
 		val = digitalRead(pin);
 	}
-	else if (pin < EXP_B_START)
+	else if (pin < B_ROW_EXPENDER)
 	{
-		val = mcp_read(A,pin-EXP_A_START);
+		val = mcp_read(A,pin-A_ROW_EXPENDER);
 	}
 	else
 	{
-		val = mcp_read(B,pin-EXP_B_START);
+		val = mcp_read(B,pin-B_ROW_EXPENDER);
 	}
 	return val;
 }
 
 void writePin(uint8_t pin, uint8_t val)
 {
-	if(pin < EXP_A_START)
+	if(pin < A_ROW_EXPENDER)
 	{
 		digitalWrite(pin, val);
 	}
-	else if (pin < EXP_B_START)
+	else if (pin < B_ROW_EXPENDER)
 	{
-		mcp_write(A, pin-EXP_A_START, val);
+		mcp_write(A, pin-A_ROW_EXPENDER, val);
 	}
 	else
 	{
-		mcp_write(B, pin-EXP_B_START, val);
+		mcp_write(B, pin-B_ROW_EXPENDER, val);
 	}
 }

@@ -14,8 +14,44 @@
 #include "message.h"
 
 #define SERIAL_BAUD_RATE 9600
-#define MEM_IS_SET UINT16_MAX
+#define MEM_IS_SET INT16_MAX
 #define MEM_ADDR 0x100
+
+/**
+ * converting the spec we need (0.750 N/m) to oz-in = 106 oz-in
+ * the motor is rated at 16.7rpm@0oz-in, 0rpm@774oz-in
+ * -> linear rpm/oz-in = (-16.7 / 774) −0.021576227
+ * The max speed is 16.7 + ( −0.021576227 * 106 ) (as per spec) = 14.412919938
+ * 
+ * *** MOTOR MAX SPEED: 14.4129 RPM
+ * ****************************
+ */
+#define MOTOR_MAX_SPEED 14.413
+ /**
+ * The gear ratio on the machine itself is:
+ * 	thread: 12 TPI
+ * 	nut is 28 teeth gear
+ * 	Motor Gear is 37 teeths
+ * 
+ * knowing Sa *Ta = Sb * Tb
+ * 	(14.4129 * 37) / 28 = 19.0456 rotation on the nut
+ * 
+ * 1 inch / 12 rotation
+ * 19.0456 * (1/12) = 1.5871 inch per minute.
+ * 
+ * with a travel of ~4.5 inch 
+ * that is ~ 3 minutes to do a full travel.
+ * ----------------------------------------
+ * 	This seems too slow :( based on our calculation
+ * 
+ * *************************************************************
+ *  * We provide an initial Travel in rotations
+ * we measured 4.5 inches of travel on the machine,
+ * To get the total number of rotation from travel
+ * (4.5 * 12(TPI) * 28(Tb)) / 37(Ta) = rotations
+ * with: (4.5 * ( ( 12 * 28 ) / 37 ) = 4.5 * 9.081081 = 40.8648645
+ */
+#define INITIAL_ROTATION_NECESSARY_ESTIMATE 40.865
 
 typedef struct my_time_t_t
 {
@@ -23,6 +59,7 @@ typedef struct my_time_t_t
 	uint8_t minutes;
 	uint8_t hours;
 } my_time_t;
+
 static MicrochipSRAM memory(MCU_SRAM_CS); // Instantiate the class to the given pin
 
 static debouncedPin increment_button;
@@ -34,19 +71,68 @@ static debouncedPin emergency_button;
 static debouncedPin full_switch;
 static debouncedPin empty_switch;
 
-uint16_t mem_feed_time = -1;
-uint16_t feed_time = 0;
+/**
+ * this will store the total travel in rotations that is exactly necessary once one full travel
+ * is achieved on the system
+ */
+uint16_t rotations = 0;
+uint16_t total_rotation_needed = INITIAL_ROTATION_NECESSARY_ESTIMATE;
+
+int16_t mem_feed_time = -1;
+int16_t feed_time = 0;
 my_time_t glb_timer;
 
 /**
- * we check that either case ( Normally off is on or Normally on if off )
+ * expects:
+ *  feed time; if ( 0 ) -> full throtle else adjust speed to feed time
+ *  foward; if (true): feed else: fill
  */
-bool SR_latch_state_is(uint16_t current_millis, uint8_t pin_id_NC, uint8_t pin_id_NO, uint8_t trigger)
+static int16_t motor_speed = 0;
+static void forward_motor(uint8_t feedfor)
 {
-	uint8_t current_pin_NC = readPin(pin_id_NC);  
-	uint8_t current_pin_NO = readPin(pin_id_NO); 
+	uint8_t new_motor_speed = 255;
+	if (feedfor != 0)
+	{
+		double necessary_rpm = total_rotation_needed / (double)feedfor;
+		double ratio = necessary_rpm / MOTOR_MAX_SPEED;
+		if (ratio > 1)
+		{
+			ratio = 1;
+		}
+		new_motor_speed = 255 * ratio;
+		if(new_motor_speed == 0)
+		{
+			new_motor_speed = 1;
+		}
+	}
 
-	return (current_pin_NC != trigger && current_pin_NO == trigger);
+	if( motor_speed != new_motor_speed )
+	{
+		motor_speed = new_motor_speed;
+		analogWrite(MOTOR_PWM,motor_speed);
+		digitalWrite(MOTOR_IO, 0);
+	}
+}
+
+static void stop_motor()
+{
+	if( motor_speed != 0 )
+	{
+		motor_speed = 0;
+	}
+	analogWrite(MOTOR_PWM,motor_speed);
+	digitalWrite(MOTOR_IO, 0);
+}
+
+static void reverse_motor()
+{
+	if( motor_speed != -1 )
+	{
+		motor_speed = -1;
+	}
+	/* reverse full chuch ahead*/
+	analogWrite(MOTOR_PWM,0);
+	digitalWrite(MOTOR_IO, 1);
 }
 
 void add_minute(my_time_t *timer)
@@ -112,25 +198,32 @@ void setup()
 	
 	serial_printf("Initializing\n");
 
-	serial_printf("== Pin\n");
+	serial_printf("== OUTPUT Pin\n");
+	/* SPI */
 	setPin(MCU_SRAM_CS, OUTPUT);
 	setPin(MCU_MISO, INPUT);
 	setPin(MCU_SCK, OUTPUT);
 	setPin(MCU_MOSI, OUTPUT);
-
+	/* LED */
 	setPin(LED_auto_feed, OUTPUT);
 	setPin(LED_Inc, OUTPUT);
 	setPin(LED_Dec, OUTPUT);
 	setPin(LED_feed, OUTPUT);
 	setPin(LED_fill, OUTPUT);
+	/* Buzzer */
 	setPin(Buzzer, OUTPUT);
+	/* Motor */
+	setPin(MOTOR_IO, OUTPUT);
+	setPin(MOTOR_PWM, OUTPUT);
 
-	// Set the default pin value
+	serial_printf("== INPUT Pin\n");
+	/* single throw switches */
 	increment_button.set_pin(B_Inc);
 	decrement_button.set_pin(B_Dec);
 	autofeed_button.set_pin(B_auto_feed);
 	manfeed_button.set_pin(B_feed);
 	manfill_button.set_pin(B_fill);
+	/* double throw switches */
 	emergency_button.set_pin(B_Emergency_NC, B_Emergency_NO);
 	full_switch.set_pin(empty_switch_NC, empty_switch_NO);
 	empty_switch.set_pin(full_switch_NC, full_switch_NO);
@@ -159,7 +252,7 @@ void setup()
 	}
 }
 
-uint8_t compute_feed_time(uint8_t new_feedtime)
+int16_t compute_feed_time(int16_t new_feedtime)
 {
 	if( new_feedtime > MAX_FEED_MINUTE )
 	{
@@ -169,7 +262,7 @@ uint8_t compute_feed_time(uint8_t new_feedtime)
 	{
 		new_feedtime = MAX_FEED_MINUTE;
 	}
-	return new_feedtime;
+	return (uint8_t)new_feedtime;
 }
 
 enum states_e { 
@@ -178,6 +271,9 @@ enum states_e {
 	/* can read most IO */
 	IDLE, 
 	/* transistion phase, lock most IO */
+	START_AUTO_FEED,
+	START_MANUAL_FEED,
+	START_MANUAL_FILL,
 	AUTO_FEED,
 	MANUAL_FEED,
 	MANUAL_FILL,
@@ -194,6 +290,9 @@ enum content_states_e {
 static const char *states[] = {
 	"Restarting",
 	"Idle",
+	"Automatic Feeding",
+	"Manual Feeding",
+	"Manual Refill",
 	"Automatic Feeding",
 	"Manual Feeding",
 	"Manual Refill",
@@ -214,16 +313,22 @@ void loop()
 	if ( full_switch.is_high() )
 	{
 		current_content_status = FULL;
+		stop_motor();
 	}
 
 	// always check this switch
 	if( empty_switch.is_high() )
 	{
 		current_content_status = EMPTY;
+		stop_motor();
 	}
 
 	// always check this switch
 	if( emergency_button.is_high() )
+	{
+		stop_motor();
+	}
+	else
 	{
 		switch(current_state)
 		{
@@ -231,26 +336,33 @@ void loop()
 			{
 				if( increment_button.is_falling_edge() )
 				{
-					feed_time = compute_feed_time(feed_time + 1);
+					feed_time = compute_feed_time((int)feed_time + 1);
 				}
 
 				if( decrement_button.is_falling_edge() )
 				{
-					feed_time = compute_feed_time(feed_time - 1);
+					feed_time = compute_feed_time((int)feed_time - 1);
 				}
 
-				// there is precedence here, autofeed takes priority
-				if( autofeed_button.is_falling_edge() )
+				if( current_content_status != EMPTY )
 				{
-					current_state = AUTO_FEED;
+					if( autofeed_button.is_falling_edge() )
+					{
+						current_state = AUTO_FEED;
+					}
+					
+					if ( manfeed_button.is_falling_edge() )
+					{
+						current_state = MANUAL_FEED;
+					}
 				}
-				else if ( manfeed_button.is_falling_edge() )
+
+				if( current_content_status != FULL )
 				{
-					current_state = MANUAL_FEED;
-				}
-				else if ( manfill_button.is_falling_edge() )
-				{
-					current_state = MANUAL_FILL;
+					if ( manfill_button.is_falling_edge() )
+					{
+						current_state = MANUAL_FILL;
+					}
 				}
 
 				/* if it is not running, you can change the time */
@@ -296,15 +408,16 @@ void loop()
 				else
 				{
 					/* drive the motor */
+					forward_motor(feed_time);
+					/* hall effect can give better positionning */
 					current_content_status = NOT_EMPTY;
+					/* count down the time */
+					update_time(&glb_timer, current_millis);
 				}
-
-				/* count down the time */
-				update_time(&glb_timer, current_millis);
 
 				break;
 			}
-			case MANUAL_FILL:
+			case START_MANUAL_FILL:
 			{
 				if(full_switch.is_high())
 				{
@@ -317,6 +430,8 @@ void loop()
 				else
 				{
 					/* drive the motor */
+					reverse_motor();
+					/* hall effect can give better positionning */
 					current_content_status = NOT_EMPTY;
 				}
 			}

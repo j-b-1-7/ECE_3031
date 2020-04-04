@@ -24,45 +24,44 @@
 
 enum pins_e
 {
-	/*****************
-	 * DO NOT USE IF YOU NEED SERIAL */
-	COMTX = 0,
-	COMRX = 1,
-	/*****************/
-	empty_switch_NC = 2,
-	empty_switch_NO = 3,
-	full_switch_NC = 4,
-	full_switch_NO = 5,
-	B_Emergency_NC = 6,
-	B_Emergency_NO = 7,
-	NC_8 = 8,
-	Buzzer = 9,
-	MCU_SRAM_CS = 10,
-	MCU_MOSI = 11,
-	MCU_MISO = 12,
-	MCU_SCK = 13,
-    // We start expander here (section A)
-	EXP_A_START = 14, 
-	B_auto_feed = 14,
-	B_Inc = 15,
-	B_Dec = 16,
-	B_feed = 17,
-	B_fill = 18,
-	NC_19 = 19,
-	NC_20 = 20,
-	NC_21 = 21,
-    // We start expander here (section B)
-	EXP_B_START = 22, 
-	LED_auto_feed = 22,
-	LED_Inc = 23,
-	LED_Dec = 24,
-	LED_feed = 25,
-	LED_fill = 26,
-	NC_27 = 27,
-	NC_28 = 28,
-	NC_29 = 29,
-	NC_30 = 30,
-	NB_OF_PIN = NC_30
+ARDUINO_IO = 0,
+/*********************************/
+/* DO NOT USE IF YOU NEED SERIAL */
+	COMTX =            ARDUINO_IO + 0,
+	COMRX =            ARDUINO_IO + 1,
+/*********************************/
+	MOTOR_IO =         ARDUINO_IO + 2,
+	MOTOR_PWM =        ARDUINO_IO + 3,
+	NC_4 =             ARDUINO_IO + 4,
+	NC_5 =             ARDUINO_IO + 5,
+	NC_6 =             ARDUINO_IO + 6,
+	NC_7 =             ARDUINO_IO + 7,
+	NC_8 =             ARDUINO_IO + 8,
+	Buzzer =           ARDUINO_IO + 9,
+	MCU_SRAM_CS =      ARDUINO_IO + 10,
+	MCU_MOSI =         ARDUINO_IO + 11,
+	MCU_MISO =         ARDUINO_IO + 12,
+	MCU_SCK =          ARDUINO_IO + 13,
+/* We start the IO expander here (section A) */
+A_ROW_EXPENDER = 14, 
+	B_auto_feed =      A_ROW_EXPENDER + 0,
+	B_Inc =            A_ROW_EXPENDER + 1,
+	B_Dec =            A_ROW_EXPENDER + 2,
+	B_feed =           A_ROW_EXPENDER + 3,
+	B_fill =           A_ROW_EXPENDER + 4,
+	empty_switch_NC =  A_ROW_EXPENDER + 5,
+	full_switch_NC =   A_ROW_EXPENDER + 6,
+	B_Emergency_NO =   A_ROW_EXPENDER + 7,
+/* We start the IO expander here (section B) */
+B_ROW_EXPENDER = 22, 
+	LED_auto_feed =    B_ROW_EXPENDER + 0,
+	LED_Inc =          B_ROW_EXPENDER + 1,
+	LED_Dec =          B_ROW_EXPENDER + 2,
+	LED_feed =         B_ROW_EXPENDER + 3,
+	LED_fill =         B_ROW_EXPENDER + 4,
+	empty_switch_NO =  B_ROW_EXPENDER + 5,
+	full_switch_NO =   B_ROW_EXPENDER + 6,
+	B_Emergency_NC =   B_ROW_EXPENDER + 7
 };
 
 #endif
