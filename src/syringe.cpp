@@ -30,6 +30,9 @@ static debouncedPin decrement_button;
 static debouncedPin autofeed_button;
 static debouncedPin manfeed_button;
 static debouncedPin manfill_button;
+static debouncedPin emergency_button;
+static debouncedPin full_switch;
+static debouncedPin empty_switch;
 
 uint16_t mem_feed_time = -1;
 uint16_t feed_time = 0;
@@ -175,11 +178,17 @@ enum states_e {
 	/* can read most IO */
 	IDLE, 
 	/* transistion phase, lock most IO */
-	AUTO_FEED, /* empty -> IDLE_EMPTY
+	AUTO_FEED,
 	MANUAL_FEED,
 	MANUAL_FILL,
 	/* Stop the world, something gone baaaad */
 	EMERGENCY_STOP
+};
+
+enum content_states_e { 
+	EMPTY,
+	NOT_EMPTY,
+	FULL
 };
 
 static const char *states[] = {
@@ -195,7 +204,7 @@ void loop()
 {
 	_FN_START
 	static states_e current_state = RESTARTING;
-	static bool has_content = false;
+	static content_states_e current_content_status = EMPTY;
 
 	uint16_t current_millis = millis();
 	refreshPin();
@@ -204,13 +213,13 @@ void loop()
 	/* always check this switch */
 	if ( full_switch.is_high() )
 	{
-		has_content = true;
+		current_content_status = FULL;
 	}
 
 	// always check this switch
 	if( empty_switch.is_high() )
 	{
-		has_content = false;
+		current_content_status = EMPTY;
 	}
 
 	// always check this switch
@@ -280,13 +289,14 @@ void loop()
 				{
 					current_state = RESTARTING;
 				}
-				else if(! has_content)
+				else if(current_content_status == EMPTY)
 				{
 					current_state = RESTARTING;
 				}
 				else
 				{
 					/* drive the motor */
+					current_content_status = NOT_EMPTY;
 				}
 
 				/* count down the time */
@@ -300,13 +310,14 @@ void loop()
 				{
 					current_state = IDLE;
 				}
-				else if( manfill_button.is_high() )
+				else if( current_content_status == FULL )
 				{
 					current_state = IDLE;
 				}
 				else
 				{
 					/* drive the motor */
+					current_content_status = NOT_EMPTY;
 				}
 			}
 			default:
@@ -326,7 +337,7 @@ void loop()
 	writePin(LED_Dec,decrement_button.is_low());
 	writePin(LED_fill,manfill_button.is_low());
 	writePin(LED_feed,manfeed_button.is_low());
-	writePin(LED_auto_feed,auto_feed);
+	writePin(LED_auto_feed,current_state == AUTO_FEED);
 	lcd_printf("%s\nTIME(h:m:s): %02hu:%02hu:%02hu", 
 		states[current_state], glb_timer.hours, glb_timer.minutes, glb_timer.seconds);
 
