@@ -1,0 +1,51 @@
+{
+    "name": "MicrochipSRAM", 
+    "version": "1.0.5", 
+    "keywords": [
+        "data", 
+        "storage"
+    ], 
+    "description": "Access all Microchip SRAM chips", 
+    "frameworks": [
+        "arduino"
+    ], 
+    "platforms": [
+        "atmelavr", 
+        "atmelsam", 
+        "espressif32", 
+        "espressif8266", 
+        "intel_arc32", 
+        "microchippic32", 
+        "nordicnrf51", 
+        "nordicnrf52", 
+        "ststm32", 
+        "ststm8", 
+        "teensy", 
+        "timsp430"
+    ], 
+    "authors": [
+        {
+            "email": null, 
+            "url": "https://github.com/SV-Zanshin", 
+            "maintainer": false, 
+            "name": "Arnd"
+        }
+    ], 
+    "repository": {
+        "type": "git", 
+        "url": "https://github.com/SV-Zanshin/MicrochipSRAM"
+    }, 
+    "homepage": null, 
+    "export": {
+        "include": null, 
+        "exclude": [
+            "extras", 
+            "docs", 
+            "tests", 
+            "test", 
+            "*.doxyfile", 
+            "*.pdf"
+        ]
+    }, 
+    "id": 6082
+}

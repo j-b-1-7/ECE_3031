@@ -2,11 +2,6 @@
 #include "pin_wrapper.h"
 #include "message.h"
 
-static uint8_t cycle_id = 0;
-void refresh_debounced_pins()
-{
-	cycle_id += 1;
-}
 
 static uint16_t time_since(uint16_t from)
 {
@@ -56,75 +51,79 @@ bool debouncedPin::_timer_is_started()
  */
 static bool SR_debounce(uint8_t s, uint8_t r, uint8_t q)
 {
-	uint8_t not_q = ! (q || r);
-	return  ! (s || not_q );
+	uint8_t not_q = !(q && r);
+	return  ! (s && not_q );
 }
 
-void debouncedPin::_refresh()
+void debouncedPin::refresh()
 {
-	if(cycle_id != this->_last_cycle_checked)
+	uint8_t new_state = this->_state;
+
+	/* default pin is normally open */
+	/* check if normally closed pin was set for double throw switches */
+	if(this->_pin_id_nc != DISCONNECTED)
 	{
-		this->_last_cycle_checked = cycle_id;
+		uint8_t pin_value_no = readPin(this->_pin_id_no);
+		uint8_t pin_value_nc = readPin(this->_pin_id_nc);
 
-		/* default pin is normally open */
+
+		/**
+		 *  grab the value using SR debounce for failsafe
+		 * if we have a double throw switch 
+		 */
+		new_state = SR_debounce(
+			pin_value_no,
+			pin_value_nc,
+			this->_state
+		);
+	}
+	/* this is a single throw switch so we need to buffer to debounce */
+	else
+	{
 		uint8_t pin_value = readPin(this->_pin_id_no);
-		/* check if normally closed pin was set for double throw switches */
-		if(this->_pin_id_nc)
+
+		// if we were waiting for an event
+		if ( ! this->_timer_is_started() )
 		{
-			/**
-			 *  grab the value using SR debounce for failsafe
-			 * if we have a double throw switch 
-			 */
-			uint8_t new_state = SR_debounce(
-				pin_value,
-				readPin(this->_pin_id_nc),
-				this->_state
-			);
-
-			this->_changed = (this->_state != new_state);
-			this->_state = new_state;
-
+			// if the event happened
+			if (pin_value != this->_state)
+			{    
+				// start the debouncer
+				this->_start_timer();
+			}
 		}
-		/* this is a single throw switch so we need to buffer to debounce */
 		else
 		{
-			// if we were waiting for an event
-			if ( ! this->_timer_is_started() )
-			{
-				// if the event happened
-				if (pin_value != this->_state)
-				{    
-					// start the debouncer
-					this->_start_timer();
-				}
-			}
-			else
-			{
-				// we add the current type (HIGH,LOW) to the counter to average later
-				this->_count[pin_value] += 1;
+			// we add the current type (HIGH,LOW) to the counter to average later
+			this->_count[pin_value] += 1;
 
-				// if we are past the debounce period
-				if (time_since(this->_millis) > DEBOUNCE_TIME)
+			// if we are past the debounce period
+			if (time_since(this->_millis) > DEBOUNCE_TIME)
+			{
+				// assume low
+				new_state = LOW;
+				if(this->_count[LOW] < this->_count[HIGH])
 				{
-					// assume low
-					uint8_t new_state = LOW;
-					if(this->_count[LOW] < this->_count[HIGH])
-					{
-						new_state = HIGH;
-					}
-
-					this->_changed = (this->_state != new_state);
-					this->_state = new_state;
-
-					if(this->_changed)
-					{
-						debug_printf("button %02hu %s\n", this->_pin_id_no, (this->_state)? "HIGH": "LOW");
-					}
-
-					// we reset the timer
-					this->_stop_timer();
+					new_state = HIGH;
 				}
+
+				// we reset the timer
+				this->_stop_timer();
 			}
+		}
+	}
+	this->_changed = (this->_state != new_state);
+	this->_state = new_state;
+
+	if(this->_changed)
+	{
+		if(this->_pin_id_nc != DISCONNECTED)
+		{
+			debug_printf("button %02hu - %02hu %s\n", this->_pin_id_no, this->_pin_id_nc, (this->_state)? "HIGH": "LOW");
+		}
+		else
+		{
+			debug_printf("button %02hu %s\n", this->_pin_id_no, (this->_state)? "HIGH": "LOW");
 		}
 	}
 }
@@ -135,34 +134,31 @@ void debouncedPin::set_pin(uint8_t pin_id)
     setPin(this->_pin_id_no, INPUT);
 }
 
-void debouncedPin::set_pin(uint8_t pin_id_nc, uint8_t pin_id_no)
+void debouncedPin::set_pin(uint8_t pin_id_no, uint8_t pin_id_nc)
 {
-	this->_pin_id_nc = pin_id_nc;
-    setPin(this->_pin_id_nc, INPUT);
 	this->_pin_id_no = pin_id_no;
     setPin(this->_pin_id_no, INPUT);
+
+	this->_pin_id_nc = pin_id_nc;
+    setPin(this->_pin_id_nc, INPUT);
 }
 
 uint8_t debouncedPin::is_high()
 {
-	_refresh();
     return (this->_state == HIGH);
 }
 
 uint8_t debouncedPin::is_low()
 {
-	_refresh();
-    return (this->_state == HIGH);
+    return (this->_state == LOW);
 }
 
 uint8_t debouncedPin::is_falling_edge()
 {
-	_refresh();
     return (this->_changed && this->is_low());
 }
 
 uint8_t debouncedPin::is_rising_edge()
 {
-	_refresh();
     return (this->_changed && this->is_high());
 }
